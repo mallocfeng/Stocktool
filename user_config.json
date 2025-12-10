@@ -1,4 +1,0 @@
-{
-  "csv_path": "/Volumes/MacMiniDisk/project/StockTool/testdata.csv",
-  "formula": "E1 := EMA(C,5);\nE2 := EMA(C,20);\n\nB_COND := CROSS(E1, E2);\nS_COND := CROSS(E2, E1);"
-}
