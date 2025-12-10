@@ -37,7 +37,7 @@ def plot_strategy_stats(results: List[Tuple[str, BacktestResult]]):
         ax.grid(axis="y", linestyle="--", alpha=0.4)
 
     fig.tight_layout()
-    plt.show()
+    plt.show(block=False)
 
 
 def plot_trade_chart(
@@ -80,7 +80,7 @@ def plot_trade_chart(
 
     fig.autofmt_xdate()
     fig.tight_layout()
-    plt.show()
+    plt.show(block=False)
 
 
 def plot_multi_timeframe(signals: Dict[str, Dict[str, pd.Series]], df_dict: Dict[str, pd.DataFrame]):
@@ -99,7 +99,7 @@ def plot_multi_timeframe(signals: Dict[str, Dict[str, pd.Series]], df_dict: Dict
         ax.grid(alpha=0.3)
         ax.legend(loc="upper left")
     fig.tight_layout()
-    plt.show()
+    plt.show(block=False)
 
 
 def plot_heatmap(heatmap_df: pd.DataFrame):
@@ -117,4 +117,4 @@ def plot_heatmap(heatmap_df: pd.DataFrame):
     ax.set_title("不同买入日期+持有天数收益热力图")
     plt.colorbar(im, ax=ax, label="收益率")
     fig.tight_layout()
-    plt.show()
+    plt.show(block=False)
