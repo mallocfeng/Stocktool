@@ -3,7 +3,7 @@ import os
 import shutil
 import json
 from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, UploadFile, File, HTTPException, Body
+from fastapi import FastAPI, UploadFile, File, HTTPException, Body, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pandas as pd
@@ -71,6 +71,14 @@ class MultiTimeframeRequest(BaseModel):
 
 class StrategyTextRequest(BaseModel):
     text: str
+
+# --- WebSocket ---
+
+@app.websocket("/ws")
+async def noop_ws(socket: WebSocket):
+    """Accept and immediately close stray websocket requests (e.g. from dev tooling)."""
+    await socket.accept()
+    await socket.close()
 
 # --- Endpoints ---
 
