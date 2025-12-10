@@ -23,14 +23,14 @@ const handleRun = async (configPayload) => {
   logs.value = ['正在发送请求…'];
   isRunning.value = true;
   try {
-    const res = await axios.post('http://127.0.0.1:8000/run_backtest', payload);
+    const res = await axios.post('/run_backtest', payload);
     if (res.data.status === 'success') {
       backtestResults.value = res.data.entries;
       logs.value = res.data.logs || [];
       if (res.data.entries.length) {
         selectedEquity.value = res.data.entries[0].result.equity_curve;
       }
-      const marketRes = await axios.get('http://127.0.0.1:8000/market_data_chart');
+      const marketRes = await axios.get('/market_data_chart');
       marketData.value = marketRes.data;
       hasData.value = true;
     } else {

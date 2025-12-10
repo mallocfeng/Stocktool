@@ -66,7 +66,7 @@ watch(
 const fetchScores = async () => {
   loading.value = true;
   try {
-    const res = await axios.post('http://127.0.0.1:8000/analytics/scores');
+    const res = await axios.post('/analytics/scores');
     scores.value = res.data || [];
     await nextTick();
     if (scores.value.length) renderScoreChart();
@@ -81,7 +81,7 @@ const fetchStress = async () => {
   loading.value = true;
   stressMessage.value = '';
   try {
-    const res = await axios.post('http://127.0.0.1:8000/analytics/stress');
+    const res = await axios.post('/analytics/stress');
     if (Array.isArray(res.data)) {
       stressTest.value = res.data;
       stressMessage.value = '';
@@ -100,7 +100,7 @@ const fetchStress = async () => {
 const fetchBrief = async () => {
   loading.value = true;
   try {
-    const res = await axios.post('http://127.0.0.1:8000/analytics/daily_brief');
+    const res = await axios.post('/analytics/daily_brief');
     dailyBrief.value = res.data?.text || '';
   } catch (e) {
     console.error(e);
@@ -114,7 +114,7 @@ const fetchPlan = async () => {
   planMessage.value = '';
   try {
     const payload = { capital: props.initialCapital || 100000 };
-    const res = await axios.post('http://127.0.0.1:8000/analytics/position_plan', payload);
+    const res = await axios.post('/analytics/position_plan', payload);
     if (Array.isArray(res.data)) {
       positionPlan.value = res.data;
       planMessage.value = '';
@@ -133,7 +133,7 @@ const fetchPlan = async () => {
 const fetchStop = async () => {
   loading.value = true;
   try {
-    const res = await axios.post('http://127.0.0.1:8000/analytics/stop_suggestion');
+    const res = await axios.post('/analytics/stop_suggestion');
     stopSuggestion.value = res.data;
   } catch (e) {
     console.error(e);
@@ -146,7 +146,7 @@ const fetchHeatmap = async () => {
   loading.value = true;
   heatmapMessage.value = '';
   try {
-    const res = await axios.post('http://127.0.0.1:8000/analytics/heatmap');
+    const res = await axios.post('/analytics/heatmap');
     if (res.data?.data) {
       heatmapData.value = res.data;
       const map = {};
@@ -172,7 +172,7 @@ const fetchMulti = async () => {
   loading.value = true;
   multiMessage.value = '';
   try {
-    const res = await axios.post('http://127.0.0.1:8000/analytics/multi_timeframe', { freqs: parseFreqs() });
+    const res = await axios.post('/analytics/multi_timeframe', { freqs: parseFreqs() });
     if (Array.isArray(res.data) && res.data.length) {
       multiSignals.value = res.data;
       multiMessage.value = '';

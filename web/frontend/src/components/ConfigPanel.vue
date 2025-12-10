@@ -37,7 +37,7 @@ const handleFileUpload = async (event) => {
   formData.append('file', file);
   uploading.value = true;
   try {
-    const res = await axios.post('http://127.0.0.1:8000/upload', formData);
+    const res = await axios.post('/upload', formData);
     config.csv_path = res.data.path;
     autoRunBacktest();
   } catch (e) {
@@ -62,7 +62,7 @@ const convertFromText = async () => {
     return;
   }
   try {
-    const res = await axios.post('http://127.0.0.1:8000/analytics/nlp_formula', { text: desc });
+    const res = await axios.post('/analytics/nlp_formula', { text: desc });
     config.formula = res.data.formula || config.formula;
   } catch (e) {
     alert('转换失败：' + (e.response?.data?.detail || e.message));
