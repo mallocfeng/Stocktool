@@ -4,3 +4,6 @@ user_config.json
 web/frontend/node_modules/
 web/frontend/dist/
 results/
+web/backend/uploads/
+*.csv
+!testdata.csv
