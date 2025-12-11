@@ -207,26 +207,93 @@ def generate_daily_brief(
     buy: Optional[pd.Series],
     sell: Optional[pd.Series],
 ) -> str:
-    close = df["close"]
-    last_date = df.index[-1]
-    change_pct = (close.iloc[-1] / close.iloc[-2] - 1) * 100 if len(close) > 1 else 0
-    parts = [f"【复盘摘要】{last_date.date()} 收盘 {close.iloc[-1]:.2f}, 涨跌 {change_pct:.2f}%"]
+    if df.empty or "close" not in df.columns:
+        return "【复盘摘要】当前数据不足，无法生成复盘内容。"
+
+    frame = df.copy()
+    if "date" in frame.columns:
+        frame["date"] = pd.to_datetime(frame["date"])
+        frame.set_index("date", inplace=True)
+
+    close = frame["close"].astype(float)
+    last_date = close.index[-1]
+    last_close = float(close.iloc[-1])
+    prev_close = float(close.iloc[-2]) if len(close) > 1 else last_close
+    change_pct = (last_close / prev_close - 1) * 100 if prev_close else 0.0
+    high = float(frame.get("high", close).iloc[-1])
+    low = float(frame.get("low", close).iloc[-1])
+    intraday_range = (high / low - 1) * 100 if low else 0.0
+    volume = float(frame.get("volume", pd.Series(dtype=float)).iloc[-1]) if "volume" in frame else 0.0
+    avg_volume = float(frame["volume"].tail(5).mean()) if "volume" in frame else 0.0
+    volume_desc = ""
+    if avg_volume > 0:
+        ratio = volume / avg_volume if avg_volume else 1.0
+        volume_desc = f"；成交量 {volume/1e4:.1f} 万手，较5日均{'放大' if ratio >= 1 else '缩量'} {abs(ratio-1)*100:.0f}%"
+
+    ma_short = close.ewm(span=5, adjust=False).mean().iloc[-1]
+    ma_long = close.ewm(span=20, adjust=False).mean().iloc[-1]
+    trend_desc = (
+        "5日均线在20日均线上方，短线保持多头结构"
+        if ma_short > ma_long
+        else "5日均线跌破20日均线，短线偏弱"
+    )
+
+    base = [
+        f"【复盘摘要】{last_date.date()} 收盘 {last_close:.2f}（{change_pct:+.2f}%），日内波幅 {intraday_range:.2f}%{volume_desc}",
+        f"趋势观察：{trend_desc}，近10日涨跌 {((last_close / close.iloc[-10]) - 1) * 100:.2f}%"
+        if len(close) >= 10
+        else f"趋势观察：{trend_desc}",
+    ]
 
     if scoring is not None and not scoring.empty:
-        total = scoring["total_score"].iloc[-1]
-        parts.append(f"指标评分：{total:+.1f} (MA {scoring['MA'].iloc[-1]}, RSI {scoring['RSI'].iloc[-1]})")
+        latest_score = scoring.iloc[-1]
+        total = latest_score.get("total_score", 0.0)
+        components = []
+        for col in latest_score.index:
+            if col in {"total_score", "date"}:
+                continue
+            components.append((col, latest_score[col]))
+        components.sort(key=lambda item: abs(item[1]), reverse=True)
+        detail = "，".join([f"{name} {value:+.1f}" for name, value in components[:3]])
+        base.append(f"指标评分：{total:+.1f}（{detail}）")
 
     if result is not None:
-        parts.append(
-            f"策略净值 {result.equity_curve.iloc[-1]:.0f}, 年化 {result.annualized_return*100:.1f}%, 最大回撤 {result.max_drawdown*100:.1f}%"
+        equity_last = float(result.equity_curve.iloc[-1])
+        total_return = result.total_return * 100
+        annualized = result.annualized_return * 100
+        max_dd = result.max_drawdown * 100
+        win_rate = result.win_rate * 100
+        avg_win = result.avg_win * 100
+        avg_loss = result.avg_loss * 100
+        base.append(
+            "策略表现：净值 {equity:.0f}（{ret:+.1f}%），年化 {ann:+.1f}%，最大回撤 {dd:.1f}%，胜率 {win:.1f}%（平均盈 {avg_win:+.1f}% / 亏 {avg_loss:+.1f}%）".format(
+                equity=equity_last,
+                ret=total_return,
+                ann=annualized,
+                dd=max_dd,
+                win=win_rate,
+                avg_win=avg_win,
+                avg_loss=avg_loss,
+            )
         )
 
-    if buy is not None and buy.iloc[-1]:
-        parts.append("今日触发买入信号")
-    if sell is not None and sell.iloc[-1]:
-        parts.append("今日触发卖出信号")
+    signals = []
+    if buy is not None and not buy.empty:
+        last_buy_idx = buy[buy].index[-1] if buy.any() else None
+        if buy.iloc[-1]:
+            signals.append("今日触发买入信号")
+        elif last_buy_idx is not None:
+            signals.append(f"最近买入信号：{last_buy_idx.date()}")
+    if sell is not None and not sell.empty:
+        last_sell_idx = sell[sell].index[-1] if sell.any() else None
+        if sell.iloc[-1]:
+            signals.append("今日触发卖出信号")
+        elif last_sell_idx is not None:
+            signals.append(f"最近卖出信号：{last_sell_idx.date()}")
+    if signals:
+        base.append("信号追踪：" + "，".join(signals))
 
-    return "；".join(parts)
+    return "\n".join(base)
 
 
 def simple_rule_based_formula(text: str) -> str:

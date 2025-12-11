@@ -124,7 +124,7 @@ class SinaImportRequest(BaseModel):
 
 class AIAnalysisRequest(BaseModel):
     asset_label: Optional[str] = None
-    limit_rows: int = 80
+    limit_rows: int = 60
     extra_note: Optional[str] = None
 
 # --- External Data Helpers ---
@@ -649,8 +649,8 @@ def generate_ai_insight(req: AIAnalysisRequest):
     if state.df is None:
         raise HTTPException(status_code=400, detail="Run backtest first")
 
-    limit = req.limit_rows or 80
-    limit = max(40, min(limit, 250))
+    limit = req.limit_rows or 60
+    limit = max(40, min(limit, 200))
     asset_label = (req.asset_label or "").strip() or "当前标的"
 
     recent = state.df.tail(limit).copy()
@@ -719,7 +719,7 @@ def generate_ai_insight(req: AIAnalysisRequest):
     system_prompt = (
         "你是资深证券分析师，擅长根据K线和成交量做出专业、审慎的中文研判。"
         "输出需包含：1) 行情背景与关键指标；2) 多角度走势解读；3) 风险提示；4) 未来短/中/长期展望。"
-        "语言应正式、结构化，可使用有序列表。"
+        "语言应正式、结构化，可使用有序列表，每个分点尽量控制在2-3句话。"
     )
     user_prompt = (
         f"标的：{asset_label}\\n"

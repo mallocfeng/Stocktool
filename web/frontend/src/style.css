@@ -259,7 +259,32 @@ label {
 }
 
 .ai-card {
-  min-height: 160px;
+  min-height: 120px;
+  max-height: 150px;
+  overflow: hidden;
+  transition: max-height 0.35s ease, box-shadow 0.2s ease;
+  position: relative;
+}
+
+.ai-card.expanded {
+  max-height: 560px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.6);
+}
+
+.ai-card::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 72px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0) 0%, rgba(15, 23, 42, 0.9) 80%);
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.ai-card.expanded::after {
+  opacity: 0;
 }
 
 .ai-body {
@@ -663,15 +688,53 @@ label {
 
 table {
   width: 100%;
+}
+
+.table-wrapper {
+  background: rgba(15, 23, 42, 0.85);
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  box-shadow: 0 8px 20px rgba(2, 6, 23, 0.4);
+  overflow: hidden;
+}
+
+table.modern-table {
+  width: 100%;
   border-collapse: collapse;
   font-size: 0.85rem;
 }
 
-table th,
-table td {
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  padding: 6px 8px;
+table.modern-table thead {
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.15), rgba(56, 189, 248, 0.15));
+  color: var(--text-primary);
+  letter-spacing: 0.05em;
+}
+
+table.modern-table th {
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  padding: 10px 12px;
   text-align: center;
+}
+
+table.modern-table td {
+  padding: 10px 12px;
+  text-align: center;
+}
+
+table.modern-table tbody tr {
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.4);
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+table.modern-table tbody tr:nth-child(even) {
+  background: rgba(15, 23, 42, 0.55);
+}
+
+table.modern-table tbody tr:hover {
+  background: rgba(59, 130, 246, 0.12);
+  transform: translate3d(0, -1px, 0);
 }
 
 .stop-grid {

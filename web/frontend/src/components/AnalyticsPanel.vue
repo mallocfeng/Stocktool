@@ -425,33 +425,37 @@ const planHeaderMap = {
       <section v-else-if="activeTab === 'scores'">
         <div v-if="scores.length" class="scores-view">
           <div ref="scoreChartRef" class="score-chart"></div>
-          <table>
-            <thead><tr><th>日期</th><th>综合评分</th></tr></thead>
-            <tbody>
-              <tr v-for="row in scores.slice(-80).reverse()" :key="row.date">
-                <td>{{ row.date }}</td>
-                <td :class="row.total_score >= 0 ? 'positive' : 'negative'">{{ row.total_score.toFixed(2) }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="table-wrapper">
+            <table class="modern-table">
+              <thead><tr><th>日期</th><th>综合评分</th></tr></thead>
+              <tbody>
+                <tr v-for="row in scores.slice(-80).reverse()" :key="row.date">
+                  <td>{{ row.date }}</td>
+                  <td :class="row.total_score >= 0 ? 'positive' : 'negative'">{{ row.total_score.toFixed(2) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
         <div v-else class="empty">暂无评分数据</div>
       </section>
 
       <section v-else-if="activeTab === 'plan'">
         <div v-if="!positionPlan.length" class="empty">{{ planMessage || '条件不足或尚未加载' }}</div>
-        <table v-else>
-          <thead>
-            <tr>
-              <th v-for="(value, key) in positionPlan[0]" :key="key">{{ planHeaderMap[key] || key }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(row, idx) in positionPlan" :key="idx">
-              <td v-for="(value, key) in row" :key="key">{{ typeof value === 'number' ? value.toFixed(2) : value }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-else class="table-wrapper">
+          <table class="modern-table">
+            <thead>
+              <tr>
+                <th v-for="(value, key) in positionPlan[0]" :key="key">{{ planHeaderMap[key] || key }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(row, idx) in positionPlan" :key="idx">
+                <td v-for="(value, key) in row" :key="key">{{ typeof value === 'number' ? value.toFixed(2) : value }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section v-else-if="activeTab === 'stop'">
@@ -545,66 +549,70 @@ const planHeaderMap = {
           <div class="dynamic-trades">
             <h4>交易明细（含动态资金指标）</h4>
             <div v-if="!dynamicTrades.length" class="empty small">暂无交易记录</div>
-            <table v-else>
-              <thead>
-                <tr>
-                  <th>开仓时间</th>
-                  <th>平仓时间</th>
-                  <th>投资金额</th>
-                  <th>连续亏损</th>
-                  <th>数量</th>
-                  <th>动态盈亏</th>
-                  <th>对冲投资</th>
-                  <th>对冲连亏</th>
-                  <th>对冲数量</th>
-                  <th>对冲盈亏</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="trade in dynamicTrades" :key="trade.entry_date + trade.exit_date">
-                  <td>{{ trade.entry_date }}</td>
-                  <td>{{ trade.exit_date }}</td>
-                  <td>{{ formatAmount(trade.investment_amount ?? '-') }}</td>
-                  <td>{{ trade.loss_streak ?? '-' }}</td>
-                  <td>{{ trade.adjusted_quantity ?? '-' }}</td>
-                  <td :class="(trade.pnl_with_dynamic_fund ?? 0) >= 0 ? 'positive' : 'negative'">
-                    {{ formatAmount(trade.pnl_with_dynamic_fund ?? '-') }}
-                  </td>
-                  <td>{{ formatAmount(trade.hedge_investment_amount ?? '-') }}</td>
-                  <td>{{ trade.hedge_loss_streak ?? '-' }}</td>
-                  <td>{{ trade.hedge_adjusted_quantity ?? '-' }}</td>
-                  <td :class="(trade.hedge_pnl_with_dynamic_fund ?? 0) >= 0 ? 'positive' : 'negative'">
-                    {{ trade.hedge_pnl_with_dynamic_fund != null ? formatAmount(trade.hedge_pnl_with_dynamic_fund) : '-' }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+            <div v-else class="table-wrapper compact-table">
+              <table class="modern-table">
+                <thead>
+                  <tr>
+                    <th>开仓时间</th>
+                    <th>平仓时间</th>
+                    <th>投资金额</th>
+                    <th>连续亏损</th>
+                    <th>数量</th>
+                    <th>动态盈亏</th>
+                    <th>对冲投资</th>
+                    <th>对冲连亏</th>
+                    <th>对冲数量</th>
+                    <th>对冲盈亏</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="trade in dynamicTrades" :key="trade.entry_date + trade.exit_date">
+                    <td>{{ trade.entry_date }}</td>
+                    <td>{{ trade.exit_date }}</td>
+                    <td>{{ formatAmount(trade.investment_amount ?? '-') }}</td>
+                    <td>{{ trade.loss_streak ?? '-' }}</td>
+                    <td>{{ trade.adjusted_quantity ?? '-' }}</td>
+                    <td :class="(trade.pnl_with_dynamic_fund ?? 0) >= 0 ? 'positive' : 'negative'">
+                      {{ formatAmount(trade.pnl_with_dynamic_fund ?? '-') }}
+                    </td>
+                    <td>{{ formatAmount(trade.hedge_investment_amount ?? '-') }}</td>
+                    <td>{{ trade.hedge_loss_streak ?? '-' }}</td>
+                    <td>{{ trade.hedge_adjusted_quantity ?? '-' }}</td>
+                    <td :class="(trade.hedge_pnl_with_dynamic_fund ?? 0) >= 0 ? 'positive' : 'negative'">
+                      {{ trade.hedge_pnl_with_dynamic_fund != null ? formatAmount(trade.hedge_pnl_with_dynamic_fund) : '-' }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
           <div class="dynamic-detail">
             <h4>投资金额序列（最近 120 条）</h4>
             <div v-if="!dynamicDetails.length" class="empty small">暂无投资序列记录</div>
-            <table v-else>
-              <thead>
-                <tr>
-                  <th>日期</th>
-                  <th>投资金额</th>
-                  <th>连亏次数</th>
-                  <th>对冲金额</th>
-                  <th>对冲连亏</th>
-                  <th>止损触发</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="row in dynamicDetails.slice(-120).reverse()" :key="row.date + (row.investmentAmount ?? 0)">
-                  <td>{{ row.date }}</td>
-                  <td>{{ formatAmount(row.investmentAmount) }}</td>
-                  <td>{{ row.lossStreak }}</td>
-                  <td>{{ formatAmount(row.hedgeInvestmentAmount) }}</td>
-                  <td>{{ row.hedgeLossStreak }}</td>
-                  <td>{{ formatBoolean(row.forceStop) }}</td>
-                </tr>
-              </tbody>
-            </table>
+            <div v-else class="table-wrapper compact-table">
+              <table class="modern-table">
+                <thead>
+                  <tr>
+                    <th>日期</th>
+                    <th>投资金额</th>
+                    <th>连亏次数</th>
+                    <th>对冲金额</th>
+                    <th>对冲连亏</th>
+                    <th>止损触发</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in dynamicDetails.slice(-120).reverse()" :key="row.date + (row.investmentAmount ?? 0)">
+                    <td>{{ row.date }}</td>
+                    <td>{{ formatAmount(row.investmentAmount) }}</td>
+                    <td>{{ row.lossStreak }}</td>
+                    <td>{{ formatAmount(row.hedgeInvestmentAmount) }}</td>
+                    <td>{{ row.hedgeLossStreak }}</td>
+                    <td>{{ formatBoolean(row.forceStop) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </section>
@@ -641,7 +649,13 @@ const planHeaderMap = {
       </section>
 
       <section v-else-if="activeTab === 'brief'" class="brief-view">
-        <pre>{{ dailyBrief || '点击加载复盘摘要' }}</pre>
+        <div class="brief-card" v-if="dailyBrief">
+          <div class="brief-line" v-for="(line, idx) in dailyBrief.split('\n')" :key="idx">
+            <span v-if="idx === 0" class="tag">复盘摘要</span>
+            <p>{{ idx === 0 ? line.replace('【复盘摘要】', '') : line }}</p>
+          </div>
+        </div>
+        <div v-else class="empty">点击加载复盘摘要</div>
       </section>
     </div>
   </div>
@@ -714,22 +728,60 @@ const planHeaderMap = {
   justify-content: space-between;
   font-size: 13px;
 }
-.dynamic-trades table,
-.dynamic-detail table {
-  width: 100%;
-  border-collapse: collapse;
-}
-.dynamic-trades th,
-.dynamic-trades td,
-.dynamic-detail th,
-.dynamic-detail td {
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  padding: 6px;
-  font-size: 12px;
-}
 .dynamic-trades h4,
 .dynamic-detail h4 {
   margin-bottom: 8px;
+}
+.dynamic-trades .table-wrapper,
+.dynamic-detail .table-wrapper {
+  margin-top: 6px;
+}
+.dynamic-trades th,
+.dynamic-detail th {
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+}
+.dynamic-trades td,
+.dynamic-detail td {
+  font-size: 0.78rem;
+}
+.compact-table {
+  padding: 0;
+}
+.brief-view {
+  margin-top: 12px;
+}
+.brief-card {
+  background: rgba(15, 23, 42, 0.85);
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  padding: 16px 18px;
+  box-shadow: 0 10px 30px rgba(2, 6, 23, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.brief-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  line-height: 1.4;
+}
+.brief-line .tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  background: linear-gradient(120deg, rgba(59, 130, 246, 0.35), rgba(16, 185, 129, 0.35));
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+.brief-line p {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--text-primary);
 }
 .empty.small {
   font-size: 12px;

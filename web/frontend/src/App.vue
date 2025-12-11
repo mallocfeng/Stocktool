@@ -28,6 +28,7 @@ const aiLoading = ref(false);
 const aiError = ref('');
 const datasetSignature = ref('');
 const cachedSignature = ref('');
+const aiCardExpanded = ref(false);
 let aiTicket = 0;
 
 const aiRenderedHtml = computed(() => {
@@ -177,6 +178,14 @@ const requestAIInsight = async (force = false) => {
     }
   }
 };
+
+const handleAIMouseEnter = () => {
+  aiCardExpanded.value = true;
+};
+
+const handleAIMouseLeave = () => {
+  aiCardExpanded.value = false;
+};
 </script>
 
 <template>
@@ -222,7 +231,14 @@ const requestAIInsight = async (force = false) => {
             :investmentHedge="investmentCurveHedge"
           />
         </div>
-        <div class="card ai-card">
+        <div
+          class="card ai-card"
+          :class="{ expanded: aiCardExpanded }"
+          @mouseenter="handleAIMouseEnter"
+          @mouseleave="handleAIMouseLeave"
+          @focusin="handleAIMouseEnter"
+          @focusout="handleAIMouseLeave"
+        >
           <div class="panel-header">
             <div>
               <h3>当前股票趋势解读</h3>
