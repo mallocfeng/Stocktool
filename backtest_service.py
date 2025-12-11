@@ -6,6 +6,7 @@ from typing import Dict, List
 import pandas as pd
 
 from formula_engine import TdxFormulaEngine
+from data_loader import load_price_csv
 from backtesting import (
     BacktestResult,
     backtest_fixed_period,
@@ -58,7 +59,7 @@ def _run_backtests(params: BacktestParams, stop_event, emit) -> None:
 
     emit("log", f"加载行情数据：{params.csv_path}")
     try:
-        df = pd.read_csv(params.csv_path)
+        df = load_price_csv(params.csv_path)
     except Exception as exc:  # noqa: BLE001
         emit("error", RuntimeError(f"读取 CSV 失败：{exc}"))
         raise

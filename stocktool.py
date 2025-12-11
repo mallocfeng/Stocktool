@@ -37,6 +37,8 @@ from typing import List, Dict, Tuple, Optional
 import numpy as np
 import pandas as pd
 
+from data_loader import load_price_csv
+
 
 # ==============================
 #   通达信函数实现
@@ -563,7 +565,7 @@ class StockToolGUI:
 
         # 读取数据
         try:
-            df = pd.read_csv(csv_path)
+            df = load_price_csv(csv_path)
         except Exception as e:
             messagebox.showerror("错误", f"读取 CSV 失败：\n{e}")
             return
