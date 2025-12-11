@@ -56,6 +56,7 @@ class StrategyConfig(BaseModel):
     tpsl: Optional[Dict[str, float]] = None
     dca: Optional[Dict[str, float]] = None
     grid: Optional[Dict[str, Any]] = None
+    dynamic: Optional[Dict[str, Any]] = None
 
 class BacktestRequest(BaseModel):
     csv_path: str
@@ -246,7 +247,7 @@ def serialize_backtest_result(res) -> Dict:
     trades_data = []
     if res.trades:
         for t in res.trades:
-            trades_data.append({
+            trade_payload = {
                 "entry_date": str(t.entry_date),
                 "entry_price": float(t.entry_price),
                 "exit_date": str(t.exit_date),
@@ -254,9 +255,26 @@ def serialize_backtest_result(res) -> Dict:
                 "return_pct": float(t.return_pct),
                 "holding_days": int(t.holding_days),
                 "note": str(t.note)
-            })
+            }
+            if getattr(t, "investment_amount", None) is not None:
+                trade_payload["investment_amount"] = float(t.investment_amount)
+            if getattr(t, "loss_streak", None) is not None:
+                trade_payload["loss_streak"] = int(t.loss_streak)
+            if getattr(t, "adjusted_quantity", None) is not None:
+                trade_payload["adjusted_quantity"] = int(t.adjusted_quantity)
+            if getattr(t, "pnl_with_dynamic_fund", None) is not None:
+                trade_payload["pnl_with_dynamic_fund"] = float(t.pnl_with_dynamic_fund)
+            if getattr(t, "hedge_investment_amount", None) is not None:
+                trade_payload["hedge_investment_amount"] = float(t.hedge_investment_amount)
+            if getattr(t, "hedge_loss_streak", None) is not None:
+                trade_payload["hedge_loss_streak"] = int(t.hedge_loss_streak)
+            if getattr(t, "hedge_adjusted_quantity", None) is not None:
+                trade_payload["hedge_adjusted_quantity"] = int(t.hedge_adjusted_quantity)
+            if getattr(t, "hedge_pnl_with_dynamic_fund", None) is not None:
+                trade_payload["hedge_pnl_with_dynamic_fund"] = float(t.hedge_pnl_with_dynamic_fund)
+            trades_data.append(trade_payload)
 
-    return {
+    payload = {
         "total_return": float(res.total_return),
         "annualized_return": float(res.annualized_return),
         "max_drawdown": float(res.max_drawdown),
@@ -266,6 +284,31 @@ def serialize_backtest_result(res) -> Dict:
         "equity_curve": equity_data,
         "trades": trades_data
     }
+    if getattr(res, "dynamic_equity_curve", None) is not None:
+        dyn_times = res.dynamic_equity_curve.index.astype(str).tolist()
+        dyn_values = res.dynamic_equity_curve.values.tolist()
+        payload["equityCurveWithDynamicFund"] = list(zip(dyn_times, dyn_values))
+    if getattr(res, "investment_curve_main", None):
+        payload["investmentCurveMain"] = res.investment_curve_main
+        payload["investmentAmount"] = res.investment_curve_main  # backward compatibility
+    if getattr(res, "investment_curve_hedge", None):
+        payload["investmentCurveHedge"] = res.investment_curve_hedge
+        payload["hedgeInvestmentAmount"] = res.investment_curve_hedge
+    payload["forceStop"] = bool(getattr(res, "dynamic_force_stop", False))
+    payload["forceStopByDrawdown"] = bool(getattr(res, "dynamic_force_stop", False))
+    if getattr(res, "position_details", None):
+        payload["positionDetail"] = res.position_details
+    if getattr(res, "max_loss_streak_used", None) is not None:
+        payload["maxLossStreakUsed"] = int(res.max_loss_streak_used)
+    if getattr(res, "max_investment_used", None) is not None:
+        payload["maxInvestmentUsed"] = float(res.max_investment_used)
+    if getattr(res, "hedge_max_loss_streak_used", None) is not None:
+        payload["hedgeMaxLossStreakUsed"] = res.hedge_max_loss_streak_used
+    if getattr(res, "hedge_max_investment_used", None) is not None:
+        payload["hedgeMaxInvestmentUsed"] = res.hedge_max_investment_used
+    if getattr(res, "dynamic_summary", None):
+        payload["dynamicSummary"] = res.dynamic_summary
+    return payload
 
 @app.post("/run_backtest")
 def api_run_backtest(req: BacktestRequest):
@@ -278,6 +321,8 @@ def api_run_backtest(req: BacktestRequest):
         strategies["dca"] = req.strategies.dca
     if req.strategies.grid:
         strategies["grid"] = req.strategies.grid
+    if req.strategies.dynamic:
+        strategies["dynamic"] = req.strategies.dynamic
 
     if not strategies:
         raise HTTPException(status_code=400, detail="No strategies selected")

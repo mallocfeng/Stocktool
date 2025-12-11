@@ -7,3 +7,4 @@ results/
 web/backend/uploads/
 *.csv
 !testdata.csv
+.DS_Store

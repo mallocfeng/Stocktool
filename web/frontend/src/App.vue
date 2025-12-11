@@ -8,6 +8,9 @@ import AnalyticsPanel from './components/AnalyticsPanel.vue';
 const marketData = ref({ kline: [], buy_signals: [], sell_signals: [] });
 const backtestResults = ref([]);
 const selectedEquity = ref([]);
+const dynamicEquity = ref([]);
+const investmentCurveMain = ref([]);
+const investmentCurveHedge = ref([]);
 const logs = ref([]);
 const hasData = ref(false);
 const isRunning = ref(false);
@@ -29,7 +32,11 @@ const handleRun = async (configPayload) => {
       backtestResults.value = res.data.entries;
       logs.value = res.data.logs || [];
       if (res.data.entries.length) {
-        selectedEquity.value = res.data.entries[0].result.equity_curve;
+        const first = res.data.entries[0];
+        selectedEquity.value = first.result.equity_curve;
+        dynamicEquity.value = first.result.equityCurveWithDynamicFund || [];
+        investmentCurveMain.value = first.result.investmentCurveMain || first.result.investmentAmount || [];
+        investmentCurveHedge.value = first.result.investmentCurveHedge || first.result.hedgeInvestmentAmount || [];
       }
       const marketRes = await axios.get('/market_data_chart');
       marketData.value = marketRes.data;
@@ -49,6 +56,9 @@ const handleRun = async (configPayload) => {
 const handleSelectStrategy = (entry) => {
   if (!entry) return;
   selectedEquity.value = entry.result?.equity_curve || [];
+  dynamicEquity.value = entry.result?.equityCurveWithDynamicFund || [];
+  investmentCurveMain.value = entry.result?.investmentCurveMain || entry.result?.investmentAmount || [];
+  investmentCurveHedge.value = entry.result?.investmentCurveHedge || entry.result?.hedgeInvestmentAmount || [];
 };
 </script>
 
@@ -87,7 +97,13 @@ const handleSelectStrategy = (entry) => {
             </div>
             <span v-if="backtestResults.length" class="tag">{{ backtestResults[0].title }}</span>
           </div>
-          <ChartPanel :marketData="marketData" :equityData="selectedEquity" />
+          <ChartPanel
+            :marketData="marketData"
+            :equityData="selectedEquity"
+            :dynamicEquity="dynamicEquity"
+            :investmentMain="investmentCurveMain"
+            :investmentHedge="investmentCurveHedge"
+          />
         </div>
         <AnalyticsPanel
           :results="backtestResults"

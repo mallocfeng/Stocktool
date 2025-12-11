@@ -7,10 +7,24 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['run']);
+let importTicket = 0;
+
+const DEFAULT_FORMULA = `SHORT := EMA(CLOSE,12);
+LONG := EMA(CLOSE,26);
+DIF := SHORT - LONG;
+DEA := EMA(DIF,9);
+MACD := 2 * (DIF - DEA);
+MA5 := MA(CLOSE,5);
+MA13 := MA(CLOSE,13);
+MA34 := MA(CLOSE,34);
+VOLMA5 := MA(VOL,5);
+VOLMA20 := MA(VOL,20);
+B_COND := C > MA5 AND MA5 > MA13 AND MA13 > MA34 AND C > REF(C,1) AND VOL > VOLMA5 * 1.2 AND MACD > 0 AND DIF > DEA AND DIF > REF(DIF,1);
+S_COND := C < MA5 OR MACD < 0 OR DIF < DEA;`;
 
 const config = reactive({
   csv_path: '',
-  formula: 'B_COND := C > REF(C, 1);',
+  formula: DEFAULT_FORMULA,
   initial_capital: 100000,
   fee_rate: 0.0005,
   multi_freqs: 'D,W,M',
@@ -20,6 +34,18 @@ const config = reactive({
     tpsl: { enabled: true, tp: 10, sl: 5 },
     dca: { enabled: false, size: 5, target: 20 },
     grid: { enabled: false, pct: 5, cash: 1000, limit: '', accumulate: true },
+    dynamic: {
+      enabled: false,
+      lossStepAmount: 2000,
+      maxAddSteps: 3,
+      maxInvestmentLimit: 50000,
+      resetOnWin: true,
+      maxDrawdownLimit: '',
+      enableHedge: false,
+      hedgeInitialInvestment: 5000,
+      hedgeLossStepAmount: 1000,
+      hedgeMaxAddSteps: 2,
+    },
   },
 });
 
@@ -36,13 +62,16 @@ const triggerFileSelect = () => {
 const handleFileUpload = async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
+  const ticket = ++importTicket;
   const formData = new FormData();
   formData.append('file', file);
   uploading.value = true;
   try {
     const res = await axios.post('/upload', formData);
+    if (ticket !== importTicket) return;
     config.csv_path = res.data.path;
     assetLabel.value = file.name || '';
+    stockCode.value = '';
     autoRunBacktest();
   } catch (e) {
     alert('上传失败：' + (e.response?.data?.detail || e.message));
@@ -57,9 +86,11 @@ const handleFetchFromSina = async () => {
     alert('请输入股票代码，例如 600519 或 sh600519');
     return;
   }
+  const ticket = ++importTicket;
   fetching.value = true;
   try {
     const res = await axios.post('/import/sina', { symbol: code });
+    if (ticket !== importTicket) return;
     config.csv_path = res.data.path;
     assetLabel.value = res.data.label || (res.data.symbol || code).toUpperCase();
     autoRunBacktest();
@@ -94,12 +125,31 @@ const convertFromText = async () => {
 
 const buildStrategiesPayload = () => {
   const strategies = {};
+  const toNumber = (value, fallback = 0) => {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : fallback;
+  };
   const toRatio = (value) => {
     const num = Number(value);
     if (Number.isNaN(num) || num <= 0) {
       return 0;
     }
     return num > 1 ? num / 100 : num;
+  };
+  const parseDrawdownLimit = (input) => {
+    if (input === null || input === undefined) return null;
+    if (typeof input === 'string') {
+      const trimmed = input.trim();
+      if (!trimmed) return null;
+      if (trimmed.endsWith('%')) {
+        const num = Number(trimmed.slice(0, -1));
+        return Number.isFinite(num) ? num / 100 : null;
+      }
+      const num = Number(trimmed);
+      return Number.isFinite(num) ? num : null;
+    }
+    const num = Number(input);
+    return Number.isFinite(num) ? num : null;
   };
   if (config.strategies.fixed.enabled) {
     const parts = config.strategies.fixed.periods
@@ -129,6 +179,25 @@ const buildStrategiesPayload = () => {
       max_grids: Number.isNaN(parsedLimit) ? null : parsedLimit,
       accumulate: Boolean(config.strategies.grid.accumulate),
     };
+  }
+  if (config.strategies.dynamic?.enabled) {
+    const drawdownLimit = parseDrawdownLimit(config.strategies.dynamic.maxDrawdownLimit);
+    const dynamicCfg = {
+      initialInvestment: toNumber(config.initial_capital),
+      lossStepAmount: toNumber(config.strategies.dynamic.lossStepAmount),
+      maxAddSteps: parseInt(config.strategies.dynamic.maxAddSteps, 10) || 0,
+      maxInvestmentLimit: toNumber(config.strategies.dynamic.maxInvestmentLimit),
+      resetOnWin: Boolean(config.strategies.dynamic.resetOnWin),
+      enableHedge: Boolean(config.strategies.dynamic.enableHedge),
+      hedgeInitialInvestment: toNumber(config.strategies.dynamic.hedgeInitialInvestment),
+      hedgeLossStepAmount: toNumber(config.strategies.dynamic.hedgeLossStepAmount),
+      hedgeMaxAddSteps: parseInt(config.strategies.dynamic.hedgeMaxAddSteps, 10) || 0,
+      maxDrawdownLimit: drawdownLimit,
+    };
+    if (drawdownLimit === null) {
+      delete dynamicCfg.maxDrawdownLimit;
+    }
+    strategies.dynamic = dynamicCfg;
   }
   return strategies;
 };
@@ -227,6 +296,58 @@ const runBacktest = () => {
 
     <section class="form-section">
       <div class="section-title">策略模块</div>
+      <div class="strategy-card dynamic-card">
+        <label class="checkbox-row">
+          <input type="checkbox" v-model="config.strategies.dynamic.enabled" />
+          <span>动态资金管理</span>
+        </label>
+        <div class="sub-grid" v-if="config.strategies.dynamic.enabled">
+          <label class="field">
+            <span>亏损加注金额</span>
+            <input type="number" v-model="config.strategies.dynamic.lossStepAmount" min="0" />
+          </label>
+          <label class="field">
+            <span>连续加注次数</span>
+            <input type="number" v-model="config.strategies.dynamic.maxAddSteps" min="0" />
+          </label>
+          <label class="field">
+            <span>单笔资金上限</span>
+            <input type="number" v-model="config.strategies.dynamic.maxInvestmentLimit" min="0" />
+          </label>
+          <label class="field">
+            <span>最大允许回撤</span>
+            <input
+              type="text"
+              v-model="config.strategies.dynamic.maxDrawdownLimit"
+              placeholder="如 50000 或 15%"
+            />
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" v-model="config.strategies.dynamic.resetOnWin" />
+            <span>盈利后恢复初始金额</span>
+          </label>
+          <div class="sub-section">
+            <label class="checkbox-row">
+              <input type="checkbox" v-model="config.strategies.dynamic.enableHedge" />
+              <span>启用反向对冲</span>
+            </label>
+            <div class="sub-grid" v-if="config.strategies.dynamic.enableHedge">
+              <label class="field">
+                <span>对冲初始金额</span>
+                <input type="number" v-model="config.strategies.dynamic.hedgeInitialInvestment" min="0" />
+              </label>
+              <label class="field">
+                <span>对冲亏损加注</span>
+                <input type="number" v-model="config.strategies.dynamic.hedgeLossStepAmount" min="0" />
+              </label>
+              <label class="field">
+                <span>对冲加注上限</span>
+                <input type="number" v-model="config.strategies.dynamic.hedgeMaxAddSteps" min="0" />
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
       <div class="strategy-card" v-for="module in ['fixed','tpsl','dca','grid']" :key="module">
         <template v-if="module==='fixed'">
           <label class="checkbox-row">

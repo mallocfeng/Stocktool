@@ -13,6 +13,7 @@ from backtesting import (
     backtest_take_profit_stop_loss,
     backtest_dca_simple,
     backtest_grid_simple,
+    backtest_dynamic_capital,
 )
 
 
@@ -137,6 +138,14 @@ def _run_backtests(params: BacktestParams, stop_event, emit) -> None:
             fee_rate,
         )
         append_result(f"grid_{cfg['grid_pct']}", title, res)
+    if "dynamic" in strategies:
+        check_cancel()
+        cfg = strategies["dynamic"]
+        title = "=== 动态资金管理策略 ==="
+        emit("log", "")
+        emit("log", title)
+        res = backtest_dynamic_capital(df, buy, sell, cfg, initial_capital, fee_rate)
+        append_result("dynamic_capital", title, res)
 
     if entries:
         import os  # local import to avoid circular issues

@@ -5,6 +5,9 @@ import * as echarts from 'echarts';
 const props = defineProps({
   marketData: { type: Object, default: () => ({}) },
   equityData: { type: Array, default: () => [] },
+  dynamicEquity: { type: Array, default: () => [] },
+  investmentMain: { type: Array, default: () => [] },
+  investmentHedge: { type: Array, default: () => [] },
 });
 
 const chartContainer = ref(null);
@@ -13,7 +16,10 @@ let resizeObserver = null;
 
 const buildOption = () => ({
   backgroundColor: '#1e293b',
-  tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+  tooltip: {
+    trigger: 'axis',
+    axisPointer: { type: 'cross' },
+  },
   grid: [
     { left: '4%', right: '4%', top: 10, height: '55%' },
     { left: '4%', right: '4%', top: '68%', height: '25%' },
@@ -32,7 +38,7 @@ const buildOption = () => ({
   ],
   series: [
     {
-      name: 'KLine',
+      name: 'K线',
       type: 'candlestick',
       data: [],
       itemStyle: {
@@ -43,7 +49,7 @@ const buildOption = () => ({
       },
     },
     {
-      name: 'Equity',
+      name: '原始权益',
       type: 'line',
       xAxisIndex: 1,
       yAxisIndex: 1,
@@ -52,7 +58,36 @@ const buildOption = () => ({
       lineStyle: { opacity: 0.8, color: '#3b82f6' },
     },
     {
-      name: 'Buy',
+      name: '动态权益',
+      type: 'line',
+      xAxisIndex: 1,
+      yAxisIndex: 1,
+      data: [],
+      smooth: true,
+      lineStyle: { opacity: 0.8, color: '#a855f7' },
+    },
+    {
+      name: '主方向投入',
+      type: 'line',
+      xAxisIndex: 1,
+      yAxisIndex: 1,
+      data: [],
+      smooth: false,
+      showSymbol: false,
+      lineStyle: { color: '#facc15', width: 1.5 },
+    },
+    {
+      name: '对冲投入',
+      type: 'line',
+      xAxisIndex: 1,
+      yAxisIndex: 1,
+      data: [],
+      smooth: false,
+      showSymbol: false,
+      lineStyle: { color: '#34d399', width: 1.2, type: 'dashed' },
+    },
+    {
+      name: '买入信号',
       type: 'scatter',
       data: [],
       symbol: 'triangle',
@@ -60,7 +95,7 @@ const buildOption = () => ({
       itemStyle: { color: '#22c55e' },
     },
     {
-      name: 'Sell',
+      name: '卖出信号',
       type: 'scatter',
       data: [],
       symbol: 'triangle',
@@ -105,6 +140,9 @@ const updateChart = () => {
     series: [
       { data: klineData },
       { data: props.equityData || [] },
+      { data: props.dynamicEquity || [] },
+      { data: props.investmentMain || [] },
+      { data: props.investmentHedge || [] },
       { data: buyPoints },
       { data: sellPoints },
     ],
@@ -113,7 +151,7 @@ const updateChart = () => {
 };
 
 watch(
-  () => [props.marketData, props.equityData],
+  () => [props.marketData, props.equityData, props.dynamicEquity, props.investmentMain, props.investmentHedge],
   () => {
     nextTick(() => updateChart());
   },
