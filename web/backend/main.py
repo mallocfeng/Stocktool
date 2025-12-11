@@ -3,6 +3,7 @@ import os
 import shutil
 import json
 import time
+import hashlib
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, UploadFile, File, HTTPException, Body, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,6 +29,46 @@ from analytics import (
 # We might need to adjust plotting functions to return data instead of calling plt.show()
 # For now, let's just focus on data endpoints.
 
+AI_PROVIDERS = {
+    "trial": {
+        "baseURL": "https://mallocfeng1982.win/v1",
+        "model_extract": "deepseek-chat",
+        "model_summarize": "deepseek-chat",
+        "apiKey": "trial",
+        "lockFields": True,
+    }
+}
+
+def _resolve_ai_config():
+    provider_key = os.environ.get("STOCKTOOL_AI_PROVIDER", "trial")
+    provider = AI_PROVIDERS.get(provider_key, {})
+    base = os.environ.get("STOCKTOOL_AI_BASE", provider.get("baseURL", "https://mallocfeng1982.win/v1"))
+    model_summary = os.environ.get(
+        "STOCKTOOL_AI_MODEL_SUMMARY",
+        provider.get("model_summarize", provider.get("model_extract", "deepseek-chat")),
+    )
+    model_extract = os.environ.get(
+        "STOCKTOOL_AI_MODEL_EXTRACT",
+        provider.get("model_extract", provider.get("model_summarize", "deepseek-chat")),
+    )
+    api_key = os.environ.get("STOCKTOOL_AI_KEY", provider.get("apiKey", ""))
+    timeout = float(os.environ.get("STOCKTOOL_AI_TIMEOUT", "90"))
+    return {
+        "base_url": base.rstrip("/"),
+        "model_summary": model_summary,
+        "model_extract": model_extract,
+        "api_key": api_key,
+        "timeout": timeout,
+        "provider": provider_key,
+    }
+
+AI_CONFIG = _resolve_ai_config()
+AI_BASE_URL = AI_CONFIG["base_url"]
+AI_MODEL = AI_CONFIG["model_summary"]
+AI_MODEL_EXTRACT = AI_CONFIG["model_extract"]
+AI_API_KEY = AI_CONFIG["api_key"]
+AI_TIMEOUT = AI_CONFIG["timeout"]
+
 app = FastAPI()
 
 app.add_middleware(
@@ -46,6 +87,7 @@ class AppState:
     results: List[BacktestEntry] = []
     scores: Optional[pd.DataFrame] = None
     formula: str = ""
+    ai_cache: Optional[Dict[str, Any]] = None
 
 state = AppState()
 
@@ -79,6 +121,11 @@ class SinaImportRequest(BaseModel):
     symbol: str
     scale: int = 240
     datalen: int = 500
+
+class AIAnalysisRequest(BaseModel):
+    asset_label: Optional[str] = None
+    limit_rows: int = 80
+    extra_note: Optional[str] = None
 
 # --- External Data Helpers ---
 
@@ -235,6 +282,67 @@ class MockStopEvent:
     def is_set(self):
         return False
 
+
+def _ensure_price_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    """Normalize column names to open/high/low/close/volume."""
+    mapping_candidates = {
+        "open": ["open", "Open", "OPEN", "o"],
+        "high": ["high", "High", "HIGH", "h"],
+        "low": ["low", "Low", "LOW", "l"],
+        "close": ["close", "Close", "CLOSE", "c", "price"],
+        "volume": ["volume", "Volume", "VOLUME", "vol", "Vol", "VOL"],
+    }
+    for target, candidates in mapping_candidates.items():
+        if target in frame.columns:
+            continue
+        for cand in candidates:
+            if cand in frame.columns:
+                frame[target] = frame[cand]
+                break
+        else:
+            frame[target] = 0.0
+    return frame
+
+
+def _align_signal_column(series, reference_index) -> pd.Series:
+    if series is None:
+        return pd.Series([False] * len(reference_index), index=reference_index)
+    try:
+        aligned = series.reindex(reference_index)
+    except Exception:
+        try:
+            aligned = pd.Series(series).reindex(reference_index)
+        except Exception:
+            aligned = pd.Series([False] * len(reference_index), index=reference_index)
+    return aligned.fillna(False).astype(bool)
+
+
+def _summarize_recent_frame(frame: pd.DataFrame, asset_label: str) -> Dict[str, Any]:
+    close_series = frame["close"].astype(float)
+    volume_series = frame["volume"].astype(float)
+    if close_series.empty:
+        return {}
+    start_close = close_series.iloc[0]
+    end_close = close_series.iloc[-1]
+    total_return = (end_close / start_close - 1) * 100 if start_close else 0
+    high_val = float(close_series.max())
+    low_val = float(close_series.min())
+    returns = close_series.pct_change().dropna()
+    volatility = float(returns.std() * (len(returns) ** 0.5)) * 100 if not returns.empty else 0
+    avg_volume = float(volume_series.mean()) if not volume_series.empty else 0
+    return {
+        "asset": asset_label,
+        "sample_count": len(frame),
+        "date_range": f"{frame['date'].iloc[0]} 至 {frame['date'].iloc[-1]}",
+        "start_close": float(start_close),
+        "end_close": float(end_close),
+        "total_return_pct": round(total_return, 2),
+        "max_close": round(high_val, 2),
+        "min_close": round(low_val, 2),
+        "volatility_pct": round(volatility, 2),
+        "avg_volume": round(avg_volume, 2),
+    }
+
 def serialize_backtest_result(res) -> Dict:
     # Convert equity curve to list of [timestamp/str, value]
     equity_data = []
@@ -366,6 +474,7 @@ def api_run_backtest(req: BacktestRequest):
     state.results = final_payload.entries
     state.formula = final_payload.formula
     state.scores = None # Reset scores on new backtest
+    state.ai_cache = None
 
     # Serialize results
     serialized_entries = []
@@ -533,3 +642,127 @@ def generate_formula(req: StrategyTextRequest):
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc))
     return {"formula": formula}
+
+
+@app.post("/analytics/ai_insight")
+def generate_ai_insight(req: AIAnalysisRequest):
+    if state.df is None:
+        raise HTTPException(status_code=400, detail="Run backtest first")
+
+    limit = req.limit_rows or 80
+    limit = max(40, min(limit, 250))
+    asset_label = (req.asset_label or "").strip() or "当前标的"
+
+    recent = state.df.tail(limit).copy()
+    if recent.empty:
+        raise HTTPException(status_code=400, detail="数据不足，无法生成分析")
+
+    if "date" in recent.columns:
+        recent_frame = recent.reset_index(drop=True)
+    else:
+        recent_frame = recent.reset_index()
+        if "index" in recent_frame.columns:
+            recent_frame.rename(columns={"index": "date"}, inplace=True)
+    if "date" not in recent_frame.columns:
+        recent_frame["date"] = recent_frame.index.astype(str)
+    else:
+        recent_frame["date"] = recent_frame["date"].astype(str)
+
+    # Align signals
+    buy_series = _align_signal_column(state.buy, recent.index) if state.buy is not None else None
+    sell_series = _align_signal_column(state.sell, recent.index) if state.sell is not None else None
+    recent_frame.reset_index(drop=True, inplace=True)
+    if buy_series is not None and len(buy_series) == len(recent_frame):
+        recent_frame["buy_signal"] = list(buy_series)
+    else:
+        recent_frame["buy_signal"] = False
+    if sell_series is not None and len(sell_series) == len(recent_frame):
+        recent_frame["sell_signal"] = list(sell_series)
+    else:
+        recent_frame["sell_signal"] = False
+
+    recent_frame = _ensure_price_columns(recent_frame)
+
+    records = []
+    for _, row in recent_frame.iterrows():
+        records.append(
+            {
+                "date": str(row["date"]),
+                "open": float(row.get("open", 0)),
+                "high": float(row.get("high", 0)),
+                "low": float(row.get("low", 0)),
+                "close": float(row.get("close", 0)),
+                "volume": float(row.get("volume", 0)),
+                "buy_signal": bool(row.get("buy_signal", False)),
+                "sell_signal": bool(row.get("sell_signal", False)),
+            }
+        )
+
+    stats_summary = _summarize_recent_frame(recent_frame, asset_label)
+    if not stats_summary:
+        raise HTTPException(status_code=400, detail="无法汇总行情数据")
+
+    signature_payload = {
+        "asset": asset_label,
+        "records": records,
+        "note": req.extra_note or "",
+    }
+    signature = hashlib.sha256(json.dumps(signature_payload, ensure_ascii=False).encode("utf-8")).hexdigest()
+    cached_ai = state.ai_cache
+    if cached_ai and cached_ai.get("signature") == signature:
+        cached_response = cached_ai.get("response", {})
+        if "signature" not in cached_response:
+            cached_response = {**cached_response, "signature": signature}
+            cached_ai["response"] = cached_response
+        return cached_response
+
+    system_prompt = (
+        "你是资深证券分析师，擅长根据K线和成交量做出专业、审慎的中文研判。"
+        "输出需包含：1) 行情背景与关键指标；2) 多角度走势解读；3) 风险提示；4) 未来短/中/长期展望。"
+        "语言应正式、结构化，可使用有序列表。"
+    )
+    user_prompt = (
+        f"标的：{asset_label}\\n"
+        f"样本区间：{stats_summary['date_range']}，共 {stats_summary['sample_count']} 条K线。\\n"
+        f"区间涨跌幅：{stats_summary['total_return_pct']}% ，波动率约 {stats_summary['volatility_pct']}%。\\n"
+        f"数据（含买入/卖出布尔信号）JSON：{json.dumps(records, ensure_ascii=False)}\\n"
+        "请严格结合数据阐述："
+        "① 最近行情与量价特征；② 买卖信号或形态的含义；③ 风险点；④ 接下来短/中/长期的走势推演。"
+    )
+    if req.extra_note:
+        user_prompt += f"附加背景：{req.extra_note}\\n"
+
+    payload = {
+        "model": AI_MODEL,
+        "temperature": 0.3,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    }
+
+    try:
+        resp = requests.post(
+            f"{AI_BASE_URL}/chat/completions",
+            headers={"Authorization": f"Bearer {AI_API_KEY}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=AI_TIMEOUT,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"AI 接口请求失败：{exc}") from exc
+
+    try:
+        data = resp.json()
+        analysis_text = data["choices"][0]["message"]["content"].strip()
+    except (ValueError, KeyError, IndexError, TypeError) as exc:  # noqa: PERF203
+        raise HTTPException(status_code=500, detail=f"AI 返回格式异常：{exc}") from exc
+
+    result = {
+        "analysis": analysis_text,
+        "stats": stats_summary,
+        "generated_at": time.time(),
+        "signature": signature,
+    }
+    state.ai_cache = {"signature": signature, "response": result}
+    return result

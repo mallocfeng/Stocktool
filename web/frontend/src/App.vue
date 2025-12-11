@@ -1,9 +1,17 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import axios from 'axios';
+import { marked } from 'marked';
 import ConfigPanel from './components/ConfigPanel.vue';
 import ChartPanel from './components/ChartPanel.vue';
 import AnalyticsPanel from './components/AnalyticsPanel.vue';
+
+marked.setOptions({
+  breaks: true,
+  gfm: true,
+});
+
+const AI_STORAGE_KEY = 'stocktool_ai_insight';
 
 const marketData = ref({ kline: [], buy_signals: [], sell_signals: [] });
 const backtestResults = ref([]);
@@ -15,6 +23,79 @@ const logs = ref([]);
 const hasData = ref(false);
 const isRunning = ref(false);
 const lastConfigMeta = ref({ initialCapital: 100000, multiFreqs: 'D,W,M', assetLabel: '' });
+const aiResult = ref(null);
+const aiLoading = ref(false);
+const aiError = ref('');
+const datasetSignature = ref('');
+const cachedSignature = ref('');
+let aiTicket = 0;
+
+const aiRenderedHtml = computed(() => {
+  const text = aiResult.value?.analysis?.trim();
+  if (!text) return '';
+  return marked.parse(text);
+});
+
+const computeDatasetSignature = (data) => {
+  if (!data || !Array.isArray(data.kline) || !data.kline.length) return '';
+  const scope = data.kline.slice(-120);
+  const sample = {
+    len: data.kline.length,
+    tail: scope.map((row) => [row.date, row.close, row.high, row.low]),
+    buy: data.buy_signals?.slice(-40) || [],
+    sell: data.sell_signals?.slice(-40) || [],
+  };
+  const raw = JSON.stringify(sample);
+  let hash = 0;
+  for (let i = 0; i < raw.length; i += 1) {
+    hash = (hash * 31 + raw.charCodeAt(i)) >>> 0;
+  }
+  return `${hash.toString(16)}-${sample.len}`;
+};
+
+const loadPersistedAIInsight = () => {
+  if (typeof window === 'undefined') return;
+  try {
+    const cached = localStorage.getItem(AI_STORAGE_KEY);
+    if (!cached) return;
+    const payload = JSON.parse(cached);
+    if (payload?.result) {
+      aiResult.value = payload.result;
+      cachedSignature.value = payload.datasetSignature || '';
+    }
+  } catch (err) {
+    console.warn('Failed to load AI insight cache', err);
+  }
+};
+
+const persistAIInsight = (signature, result) => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(
+      AI_STORAGE_KEY,
+      JSON.stringify({
+        datasetSignature: signature,
+        result,
+      }),
+    );
+    cachedSignature.value = signature;
+  } catch (err) {
+    console.warn('Failed to persist AI insight cache', err);
+  }
+};
+
+const handleDatasetSignature = (data) => {
+  const signature = computeDatasetSignature(data);
+  datasetSignature.value = signature;
+  if (!signature) return;
+  if (signature !== cachedSignature.value) {
+    requestAIInsight();
+  }
+};
+
+onMounted(() => {
+  loadPersistedAIInsight();
+});
 
 const handleRun = async (configPayload) => {
   if (!configPayload || !configPayload.payload) return;
@@ -26,6 +107,9 @@ const handleRun = async (configPayload) => {
   };
   logs.value = ['正在发送请求…'];
   isRunning.value = true;
+  aiError.value = '';
+  aiTicket += 1;
+  aiLoading.value = false;
   try {
     const res = await axios.post('/run_backtest', payload);
     if (res.data.status === 'success') {
@@ -41,6 +125,7 @@ const handleRun = async (configPayload) => {
       const marketRes = await axios.get('/market_data_chart');
       marketData.value = marketRes.data;
       hasData.value = true;
+      handleDatasetSignature(marketRes.data);
     } else {
       logs.value = res.data.logs || [res.data.error];
       alert('回测失败：' + (res.data.error || '未知错误'));
@@ -59,6 +144,38 @@ const handleSelectStrategy = (entry) => {
   dynamicEquity.value = entry.result?.equityCurveWithDynamicFund || [];
   investmentCurveMain.value = entry.result?.investmentCurveMain || entry.result?.investmentAmount || [];
   investmentCurveHedge.value = entry.result?.investmentCurveHedge || entry.result?.hedgeInvestmentAmount || [];
+};
+
+const requestAIInsight = async (force = false) => {
+  if (!hasData.value) {
+    aiError.value = '请先加载行情数据并运行回测';
+    return;
+  }
+  if (!datasetSignature.value) {
+    aiError.value = '缺少行情指纹，请先加载行情数据';
+    return;
+  }
+  if (!force && datasetSignature.value === cachedSignature.value && aiResult.value) {
+    return;
+  }
+  const currentTicket = ++aiTicket;
+  aiLoading.value = true;
+  aiError.value = '';
+  try {
+    const res = await axios.post('/analytics/ai_insight', {
+      asset_label: lastConfigMeta.value.assetLabel || '',
+    });
+    if (currentTicket !== aiTicket) return;
+    aiResult.value = res.data;
+    persistAIInsight(datasetSignature.value, res.data);
+  } catch (e) {
+    if (currentTicket !== aiTicket) return;
+    aiError.value = e.response?.data?.detail || e.message;
+  } finally {
+    if (currentTicket === aiTicket) {
+      aiLoading.value = false;
+    }
+  }
 };
 </script>
 
@@ -104,6 +221,40 @@ const handleSelectStrategy = (entry) => {
             :investmentMain="investmentCurveMain"
             :investmentHedge="investmentCurveHedge"
           />
+        </div>
+        <div class="card ai-card">
+          <div class="panel-header">
+            <div>
+              <h3>当前股票趋势解读</h3>
+              <p class="panel-subtitle">深度分析 + 未来走势预测</p>
+            </div>
+            <button class="secondary" type="button" @click="requestAIInsight(true)" :disabled="aiLoading || !hasData">
+              {{ aiLoading ? '分析中…' : '重新分析' }}
+            </button>
+          </div>
+          <div class="ai-body">
+            <div v-if="!hasData" class="ai-empty">请先上传行情数据并运行一次回测</div>
+            <div v-else-if="aiLoading" class="ai-loading">
+              <span class="spinner" aria-hidden="true"></span>
+              正在分析当前股票，请稍等…
+            </div>
+            <div v-else-if="aiError" class="ai-error">AI 分析失败：{{ aiError }}</div>
+            <div v-else-if="aiResult?.analysis" class="ai-content">
+              <ul class="ai-stats" v-if="aiResult.stats">
+                <li>区间：{{ aiResult.stats.date_range }}</li>
+                <li>区间涨跌：{{ aiResult.stats.total_return_pct }}%</li>
+                <li>波动率：{{ aiResult.stats.volatility_pct }}%</li>
+                <li>平均成交量：{{ aiResult.stats.avg_volume }}</li>
+              </ul>
+              <div
+                class="ai-analysis-text markdown-body"
+                v-if="aiRenderedHtml"
+                v-html="aiRenderedHtml"
+              ></div>
+              <div v-else class="ai-empty">暂无分析内容</div>
+            </div>
+            <div v-else class="ai-empty">暂无分析结果</div>
+          </div>
         </div>
         <AnalyticsPanel
           :results="backtestResults"
