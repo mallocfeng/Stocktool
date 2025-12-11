@@ -1,6 +1,7 @@
 <script setup>
 import { reactive, ref } from 'vue';
 import axios from 'axios';
+import FormulaBuilder from './FormulaBuilder.vue';
 
 const props = defineProps({
   busy: { type: Boolean, default: false },
@@ -54,6 +55,7 @@ const uploading = ref(false);
 const stockCode = ref('');
 const fetching = ref(false);
 const assetLabel = ref('');
+const builderVisible = ref(false);
 
 const triggerFileSelect = () => {
   fileInput.value?.click();
@@ -211,6 +213,13 @@ const autoRunBacktest = () => {
   runBacktest();
 };
 
+const handleApplyFormula = (formula) => {
+  if (typeof formula === 'string' && formula.trim()) {
+    config.formula = formula;
+  }
+  builderVisible.value = false;
+};
+
 const runBacktest = () => {
   if (!config.csv_path) {
     alert('请先上传行情 CSV 文件。');
@@ -264,7 +273,7 @@ const runBacktest = () => {
           placeholder="输入股票代码，例如 600519 或 sh600519"
         />
         <button class="secondary" type="button" @click="handleFetchFromSina" :disabled="fetching">
-          {{ fetching ? '读取中…' : '读取新浪' }}
+          {{ fetching ? '读取中…' : '读取在线数据' }}
         </button>
       </div>
     </section>
@@ -288,6 +297,7 @@ const runBacktest = () => {
       <div class="section-title">通达信公式</div>
       <textarea v-model="config.formula" rows="6" class="code-area"></textarea>
       <div class="button-row">
+        <button type="button" class="secondary" @click="builderVisible = true">公式向导</button>
         <button type="button" class="secondary" @click="checkFormula">检查公式</button>
         <button type="button" class="secondary" @click="convertFromText">自然语言转公式</button>
       </div>
@@ -424,4 +434,11 @@ const runBacktest = () => {
       {{ props.busy ? '回测执行中…' : '开始回测' }}
     </button>
   </div>
+
+  <FormulaBuilder
+    :show="builderVisible"
+    :initialFormula="config.formula"
+    @close="builderVisible = false"
+    @apply="handleApplyFormula"
+  />
 </template>
