@@ -213,6 +213,12 @@ label {
   font-size: 1.1rem;
 }
 
+.panel-subtitle {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
 .tag {
   background: rgba(59, 130, 246, 0.15);
   border: 1px solid rgba(59, 130, 246, 0.3);
@@ -278,6 +284,7 @@ label {
   gap: 10px;
   flex-wrap: wrap;
   align-items: center;
+  margin-bottom: 10px;
 }
 
 .file-row .text-input {

@@ -11,7 +11,7 @@ const selectedEquity = ref([]);
 const logs = ref([]);
 const hasData = ref(false);
 const isRunning = ref(false);
-const lastConfigMeta = ref({ initialCapital: 100000, multiFreqs: 'D,W,M' });
+const lastConfigMeta = ref({ initialCapital: 100000, multiFreqs: 'D,W,M', assetLabel: '' });
 
 const handleRun = async (configPayload) => {
   if (!configPayload || !configPayload.payload) return;
@@ -19,6 +19,7 @@ const handleRun = async (configPayload) => {
   lastConfigMeta.value = {
     initialCapital: meta?.initialCapital ?? lastConfigMeta.value.initialCapital,
     multiFreqs: meta?.multiFreqs ?? lastConfigMeta.value.multiFreqs,
+    assetLabel: meta?.assetLabel ?? lastConfigMeta.value.assetLabel,
   };
   logs.value = ['正在发送请求…'];
   isRunning.value = true;
@@ -80,7 +81,10 @@ const handleSelectStrategy = (entry) => {
       <section class="content-column">
         <div class="card chart-card">
           <div class="panel-header">
-            <h3>行情与权益走势</h3>
+            <div>
+              <h3>行情与权益走势</h3>
+              <p v-if="lastConfigMeta.assetLabel" class="panel-subtitle">标的：{{ lastConfigMeta.assetLabel }}</p>
+            </div>
             <span v-if="backtestResults.length" class="tag">{{ backtestResults[0].title }}</span>
           </div>
           <ChartPanel :marketData="marketData" :equityData="selectedEquity" />

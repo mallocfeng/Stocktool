@@ -25,6 +25,9 @@ const config = reactive({
 
 const fileInput = ref(null);
 const uploading = ref(false);
+const stockCode = ref('');
+const fetching = ref(false);
+const assetLabel = ref('');
 
 const triggerFileSelect = () => {
   fileInput.value?.click();
@@ -39,11 +42,31 @@ const handleFileUpload = async (event) => {
   try {
     const res = await axios.post('/upload', formData);
     config.csv_path = res.data.path;
+    assetLabel.value = file.name || '';
     autoRunBacktest();
   } catch (e) {
     alert('上传失败：' + (e.response?.data?.detail || e.message));
   } finally {
     uploading.value = false;
+  }
+};
+
+const handleFetchFromSina = async () => {
+  const code = stockCode.value.trim();
+  if (!code) {
+    alert('请输入股票代码，例如 600519 或 sh600519');
+    return;
+  }
+  fetching.value = true;
+  try {
+    const res = await axios.post('/import/sina', { symbol: code });
+    config.csv_path = res.data.path;
+    assetLabel.value = res.data.label || (res.data.symbol || code).toUpperCase();
+    autoRunBacktest();
+  } catch (e) {
+    alert('读取失败：' + (e.response?.data?.detail || e.message));
+  } finally {
+    fetching.value = false;
   }
 };
 
@@ -145,6 +168,7 @@ const runBacktest = () => {
     meta: {
       initialCapital: Number(config.initial_capital),
       multiFreqs: config.multi_freqs,
+      assetLabel: assetLabel.value || (config.csv_path?.split('/').pop() || ''),
     },
   });
 };
@@ -162,6 +186,17 @@ const runBacktest = () => {
           {{ uploading ? '上传中…' : '选择文件' }}
         </button>
         <input ref="fileInput" type="file" class="hidden-input" accept=".csv" @change="handleFileUpload" />
+      </div>
+      <div class="file-row">
+        <input
+          class="text-input"
+          type="text"
+          v-model="stockCode"
+          placeholder="输入股票代码，例如 600519 或 sh600519"
+        />
+        <button class="secondary" type="button" @click="handleFetchFromSina" :disabled="fetching">
+          {{ fetching ? '读取中…' : '读取新浪' }}
+        </button>
       </div>
     </section>
 

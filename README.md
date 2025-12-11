@@ -5,6 +5,7 @@ StockTool 是一个以 Python 为核心的量化回测与可视化套件，包�
 ## 功能概览
 
 - 上传任意包含 `date/open/high/low/close` 的行情 CSV，并通过自定义公式生成买卖信号。
+- 直接在界面输入股票代码，自动从新浪行情接口抓取最新历史数据，无需手动准备 CSV。
 - 内置多种策略：固定持有周期、止盈止损、定投、简单网格等，可组合回测并导出结果。
 - 提供盈亏曲线、交易列表、指标评分、压力测试、仓位计划等多维分析。
 - 前端支持一键触发回测、查看日志、展示多周期信号与复盘摘要。
@@ -34,7 +35,7 @@ StockTool/
    ```
 2. 安装依赖（根据需要补充 ta-lib、matplotlib 等）：
    ```bash
-   pip install fastapi uvicorn pandas numpy python-multipart
+   pip install fastapi uvicorn pandas numpy python-multipart requests
    ```
 3. 启动服务：
    ```bash

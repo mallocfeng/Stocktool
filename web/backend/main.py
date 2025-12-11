@@ -2,12 +2,14 @@ import sys
 import os
 import shutil
 import json
+import time
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, UploadFile, File, HTTPException, Body, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pandas as pd
 import numpy as np
+import requests
 
 # Add project root to sys.path to import existing modules
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
@@ -72,6 +74,110 @@ class MultiTimeframeRequest(BaseModel):
 class StrategyTextRequest(BaseModel):
     text: str
 
+class SinaImportRequest(BaseModel):
+    symbol: str
+    scale: int = 240
+    datalen: int = 500
+
+# --- External Data Helpers ---
+
+SINA_API_URLS = [
+    "https://quotes.sina.cn/cn/api/openapi.php/CN_MarketDataService.getKLineData",
+    "https://finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketDataService.getKLineData",
+    "http://finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketDataService.getKLineData",
+    "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketDataService.getKLineData",
+    "http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketDataService.getKLineData",
+]
+SINA_QUOTE_URL = "https://hq.sinajs.cn/list={symbol}"
+SINA_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+    "Referer": "https://finance.sina.com.cn/",
+}
+
+def normalize_symbol(symbol: str) -> str:
+    code = (symbol or "").strip().lower()
+    if not code:
+        raise ValueError("股票代码不能为空")
+    if code.startswith(("sh", "sz")):
+        return code
+    if code[0] in ("6", "9"):
+        return f"sh{code}"
+    if code[0] in ("0", "3"):
+        return f"sz{code}"
+    raise ValueError("无法识别的股票代码，请输入如 600519 或 sh600519")
+
+def fetch_sina_klines(symbol: str, scale: int, datalen: int) -> pd.DataFrame:
+    params = {
+        "symbol": symbol,
+        "scale": max(1, int(scale)),
+        "ma": "no",
+        "datalen": max(50, min(int(datalen), 2000)),
+    }
+    payload = None
+    last_exc = None
+    for url in SINA_API_URLS:
+        try:
+            resp = requests.get(url, params=params, timeout=10, headers=SINA_HEADERS)
+            resp.raise_for_status()
+            payload = resp.json()
+            break
+        except requests.RequestException as exc:
+            last_exc = exc
+        except json.JSONDecodeError as exc:  # noqa: PERF203
+            last_exc = exc
+    if payload is None:
+        raise RuntimeError(f"新浪接口请求失败：{last_exc}") from last_exc
+
+    if isinstance(payload, dict) and "result" in payload:
+        payload = payload.get("result", {}).get("data")
+
+    if not isinstance(payload, list) or not payload:
+        raise RuntimeError("未从新浪获取到行情数据")
+
+    records = []
+    for row in payload:
+        day = row.get("day")
+        if not day:
+            continue
+        date_str = str(day).split(" ")[0]
+        try:
+            records.append(
+                {
+                    "date": date_str,
+                    "open": float(row.get("open", 0)),
+                    "high": float(row.get("high", 0)),
+                    "low": float(row.get("low", 0)),
+                    "close": float(row.get("close", 0)),
+                    "volume": float(row.get("volume", 0)),
+                }
+            )
+        except (TypeError, ValueError):
+            continue
+
+    if not records:
+        raise RuntimeError("新浪行情解析失败，记录为空")
+
+    df = pd.DataFrame(records)
+    df.sort_values("date", inplace=True)
+    df.drop_duplicates(subset="date", inplace=True)
+    return df
+
+def fetch_sina_name(symbol: str) -> str:
+    try:
+        resp = requests.get(SINA_QUOTE_URL.format(symbol=symbol), timeout=5, headers=SINA_HEADERS)
+        resp.encoding = "gbk"
+        if resp.status_code != 200:
+            return symbol.upper()
+        text = resp.text.strip()
+        if "=" not in text:
+            return symbol.upper()
+        _, value = text.split("=", 1)
+        value = value.strip().strip('";')
+        name = value.split(",")[0].strip()
+        return name if name else symbol.upper()
+    except Exception:
+        return symbol.upper()
+
 # --- WebSocket ---
 
 @app.websocket("/ws")
@@ -94,6 +200,33 @@ async def upload_csv(file: UploadFile = File(...)):
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     return {"path": os.path.abspath(file_path)}
+
+@app.post("/import/sina")
+def import_from_sina(req: SinaImportRequest):
+    try:
+        symbol = normalize_symbol(req.symbol)
+    except ValueError as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    try:
+        df = fetch_sina_klines(symbol, req.scale, req.datalen)
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"请求新浪接口失败：{exc}") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    label = fetch_sina_name(symbol)
+    upload_dir = os.path.join(os.path.dirname(__file__), "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    filename = f"{symbol}_{int(time.time())}.csv"
+    file_path = os.path.join(upload_dir, filename)
+    df.to_csv(file_path, index=False)
+    return {
+        "path": os.path.abspath(file_path),
+        "symbol": symbol,
+        "label": label,
+        "rows": len(df),
+    }
 
 # --- Helpers ---
 
