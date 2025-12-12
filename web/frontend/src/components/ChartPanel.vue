@@ -25,7 +25,33 @@ const readCssVar = (name, fallback) => {
 
 const resolveBackgroundColor = () => readCssVar('--card-bg', '#1e293b');
 
+const formatTooltipValue = (val) => {
+  const num = Number(val);
+  if (!Number.isFinite(num)) return val ?? '--';
+  return num.toFixed(2);
+};
+
 const buildOption = () => {
+  const tooltipFormatter = (params = []) => {
+    if (!params.length) return '';
+    const lines = [];
+    const axisLabel = params[0]?.axisValueLabel || params[0]?.axisValue || '';
+    if (axisLabel) lines.push(axisLabel);
+    params.forEach((item) => {
+      if (item.seriesType === 'candlestick') {
+        const [openVal, closeVal, lowVal, highVal] = item.data || [];
+        lines.push(`${item.marker} ${item.seriesName}`);
+        lines.push(`&nbsp;&nbsp;开盘：${formatTooltipValue(openVal)}`);
+        lines.push(`&nbsp;&nbsp;收盘：${formatTooltipValue(closeVal)}`);
+        lines.push(`&nbsp;&nbsp;最低：${formatTooltipValue(lowVal)}`);
+        lines.push(`&nbsp;&nbsp;最高：${formatTooltipValue(highVal)}`);
+      } else {
+        const value = Array.isArray(item.value) ? item.value[1] ?? item.value[0] : item.data ?? item.value;
+        lines.push(`${item.marker} ${item.seriesName}：${formatTooltipValue(value)}`);
+      }
+    });
+    return lines.join('<br/>');
+  };
   const upColor = readCssVar('--danger', '#ef4444');
   const downColor = readCssVar('--success', '#10b981');
   const primaryLine = readCssVar('--accent', '#3b82f6');
@@ -39,6 +65,7 @@ const buildOption = () => {
   tooltip: {
     trigger: 'axis',
     axisPointer: { type: 'cross' },
+    formatter: tooltipFormatter,
   },
   grid: [
     { left: '4%', right: '4%', top: 10, height: '55%' },
