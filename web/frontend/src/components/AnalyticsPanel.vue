@@ -24,6 +24,7 @@ const categories = [
   { key: 'report', title: '专业回测报告', desc: '高级绩效指标' },
   { key: 'brief', title: '复盘摘要', desc: '自动生成复盘语句' },
   { key: 'dynamic', title: '资金管理', desc: '投入/对冲轨迹' },
+  { key: 'buyhedge', title: '买入对冲', desc: '逢跌加仓表现' },
 ];
 
 const activeTab = ref('results');
@@ -116,6 +117,14 @@ const selectResult = (entry) => {
   emit('selectStrategy', entry);
 };
 
+const selectBuyHedgeEntryIfAvailable = () => {
+  if (buyHedgeSummary.value) return;
+  const entry = props.results.find((item) => item.name === 'buy_hedge');
+  if (entry && currentEntry.value?.name !== entry.name) {
+    selectResult(entry);
+  }
+};
+
 const currentEntry = computed(() => props.results.find((entry) => entry.name === selectedResult.value) || null);
 const baseStaticEntry = computed(() => {
   const nonDynamic = props.results.find((entry) => entry.name !== 'dynamic_capital');
@@ -130,6 +139,9 @@ const investmentSeriesHedge = computed(
 const dynamicDetails = computed(() => currentEntry.value?.result?.positionDetail || []);
 const dynamicTrades = computed(() => currentEntry.value?.result?.trades || []);
 const dynamicSummary = computed(() => currentEntry.value?.result?.dynamicSummary || null);
+const buyHedgeSummary = computed(() => currentEntry.value?.result?.buyHedgeSummary || null);
+const buyHedgeTrades = computed(() => currentEntry.value?.result?.buyHedgeTrades || []);
+const buyHedgeEvents = computed(() => currentEntry.value?.result?.buyHedgeEvents || []);
 const equityCurveStatic = computed(() => baseStaticEntry.value?.result?.equity_curve || []);
 const equityCurveDynamic = computed(() => currentEntry.value?.result?.equityCurveWithDynamicFund || []);
 const dynamicForceStop = computed(
@@ -504,6 +516,9 @@ watch(
     if (activeTab.value === 'report' && props.hasData) {
       fetchReport();
     }
+    if (activeTab.value === 'buyhedge') {
+      nextTick(() => selectBuyHedgeEntryIfAvailable());
+    }
   }
 );
 
@@ -567,6 +582,9 @@ onBeforeUnmount(() => {
 
 const switchTab = (tab) => {
   activeTab.value = tab;
+  if (tab === 'buyhedge') {
+    selectBuyHedgeEntryIfAvailable();
+  }
   if (!props.hasData || tab === 'results') return;
   if (tab === 'scores') {
     if (!scores.value.length) {
@@ -614,6 +632,11 @@ const formatHands = (val) => {
   const num = Number(val);
   if (!Number.isFinite(num)) return '--';
   return `${Math.round(num)} 手`;
+};
+const formatHandsValue = (val) => {
+  const num = Number(val);
+  if (!Number.isFinite(num)) return '--';
+  return Math.round(num);
 };
 const summaryTone = (val, invert = false) => {
   const num = Number(val);
@@ -714,6 +737,31 @@ watch(
   }
 );
 
+const buyHedgeModeLabel = (mode) => {
+  const map = { equal: '等量', increment: '递增', double: '加倍' };
+  return map[mode] || mode || '-';
+};
+const buyHedgeReferenceLabel = (reference) => {
+  if (reference === 'first') return '首次买入价';
+  return '上一笔买入价';
+};
+const formatBuyHedgeLimit = (summary) => {
+  if (!summary) return '--';
+  if (summary.max_capital_input) return summary.max_capital_input;
+  if (summary.max_capital_value != null) return formatAmount(summary.max_capital_value);
+  if (summary.max_capital_ratio != null) return formatPercent(summary.max_capital_ratio);
+  return '--';
+};
+const buyHedgeEventLabel = (type) => {
+  const map = { entry: '首次买入', add: '加仓', skip: '跳过' };
+  return map[type] || '记录';
+};
+const isCategoryDisabled = (key) => {
+  if (key === 'results') return false;
+  if (!props.hasData) return true;
+  return false;
+};
+
 </script>
 
 <template>
@@ -725,7 +773,7 @@ watch(
         class="category-card"
         :class="{ active: activeTab === item.key }"
         :data-key="item.key"
-        :disabled="item.key !== 'results' && !hasData"
+        :disabled="isCategoryDisabled(item.key)"
         @click="switchTab(item.key)"
       >
         <span class="category-label">{{ item.title }}</span>
@@ -954,6 +1002,126 @@ watch(
                   </tr>
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section v-else-if="activeTab === 'buyhedge'">
+        <div v-if="!buyHedgeSummary" class="empty">当前策略未启用买入对冲模块</div>
+        <div v-else class="buyhedge-view">
+          <div class="buyhedge-summary-grid">
+            <div class="summary-card">
+              <h4>参数配置</h4>
+              <ul>
+                <li><span>步长</span><strong>{{ formatPercent(buyHedgeSummary.step_pct) }}</strong></li>
+                <li><span>模式</span><strong>{{ buyHedgeModeLabel(buyHedgeSummary.mode) }}</strong></li>
+                <li><span>起始仓位</span><strong>{{ formatHands(buyHedgeSummary.start_position) }}</strong></li>
+                <li v-if="buyHedgeSummary.mode === 'increment'">
+                  <span>递增单位</span><strong>{{ formatHands(buyHedgeSummary.increment_unit) }}</strong>
+                </li>
+                <li><span>触发基准</span><strong>{{ buyHedgeReferenceLabel(buyHedgeSummary.reference) }}</strong></li>
+                <li><span>最大加仓次数</span><strong>{{ buyHedgeSummary.max_adds > 0 ? buyHedgeSummary.max_adds : '无限制' }}</strong></li>
+                <li><span>资金占用上限</span><strong>{{ formatBuyHedgeLimit(buyHedgeSummary) }}</strong></li>
+              </ul>
+            </div>
+            <div class="summary-card">
+              <h4>执行统计</h4>
+              <ul>
+                <li><span>交易笔数</span><strong>{{ buyHedgeSummary.trade_count || 0 }}</strong></li>
+                <li><span>加仓次数</span><strong>{{ buyHedgeSummary.total_adds || 0 }}</strong></li>
+                <li>
+                  <span>单笔平均加仓</span><strong>{{ (buyHedgeSummary.avg_adds_per_trade || 0).toFixed(2) }}</strong>
+                </li>
+                <li><span>最大层数</span><strong>{{ buyHedgeSummary.max_layers || 0 }}</strong></li>
+                <li><span>平均摊低成本</span><strong>{{ formatPercent(buyHedgeSummary.avg_cost_reduction_pct || 0) }}</strong></li>
+                <li><span>最大资金占用</span><strong>{{ formatAmount(buyHedgeSummary.max_capital_used || 0) }}</strong></li>
+                <li>
+                  <span>跳过记录</span>
+                  <strong>
+                    规则 {{ buyHedgeSummary.skipped_by_rule || 0 }} /
+                    资金 {{ buyHedgeSummary.skipped_by_limit || 0 }} /
+                    现金 {{ buyHedgeSummary.skipped_by_cash || 0 }}
+                  </strong>
+                </li>
+              </ul>
+            </div>
+          </div>
+          <div class="buyhedge-panels">
+            <div class="table-wrapper compact-table">
+              <div class="panel-header">
+                <h4>交易层级统计</h4>
+                <span>含每笔加仓详情</span>
+              </div>
+              <div v-if="!buyHedgeTrades.length" class="empty small">暂无交易记录</div>
+              <div v-else>
+                <table class="modern-table">
+                  <thead>
+                    <tr>
+                      <th>开仓时间</th>
+                      <th>平仓时间</th>
+                      <th>加仓次数</th>
+                      <th>持仓（手）</th>
+                      <th>平均成本</th>
+                      <th>资金投入</th>
+                      <th>平均摊低</th>
+                      <th>盈亏</th>
+                      <th>收益率</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in buyHedgeTrades" :key="row.trade_id || row.entry_date">
+                      <td>{{ row.entry_date }}</td>
+                      <td>{{ row.exit_date }}</td>
+                      <td>{{ row.adds ?? 0 }}</td>
+                      <td>{{ formatHandsValue(row.total_shares) }}</td>
+                      <td>{{ formatAmount(row.avg_cost) }}</td>
+                      <td>{{ formatAmount(row.capital_used) }}</td>
+                      <td>{{ formatPercent(row.avg_cost_delta_pct ?? 0) }}</td>
+                      <td :class="(row.pnl ?? 0) >= 0 ? 'positive' : 'negative'">{{ formatAmount(row.pnl) }}</td>
+                      <td :class="(row.return_pct ?? 0) >= 0 ? 'positive' : 'negative'">
+                        {{ formatPercent(row.return_pct ?? 0) }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="table-wrapper compact-table">
+              <div class="panel-header">
+                <h4>买入事件</h4>
+                <span>含首次买入 / 加仓 / 跳过</span>
+              </div>
+              <div v-if="!buyHedgeEvents.length" class="empty small">尚无事件记录</div>
+              <div v-else>
+                <table class="modern-table">
+                  <thead>
+                    <tr>
+                      <th>时间</th>
+                      <th>类型</th>
+                      <th>价格</th>
+                      <th>数量（手）</th>
+                      <th>累计持仓（手）</th>
+                      <th>平均成本</th>
+                      <th>触发价</th>
+                      <th>层级</th>
+                      <th>备注</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in buyHedgeEvents.slice(-200)" :key="row.date + (row.type || '') + (row.trigger_price || 0)">
+                      <td>{{ row.date }}</td>
+                      <td>{{ buyHedgeEventLabel(row.type) }}</td>
+                      <td>{{ formatAmount(row.price) }}</td>
+                      <td>{{ formatHandsValue(row.shares) }}</td>
+                      <td>{{ formatHandsValue(row.total_shares) }}</td>
+                      <td>{{ formatAmount(row.avg_cost) }}</td>
+                      <td>{{ row.trigger_price != null ? formatAmount(row.trigger_price) : '-' }}</td>
+                      <td>{{ row.layer != null ? row.layer : '-' }}</td>
+                      <td>{{ row.note || '-' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
@@ -1398,5 +1566,49 @@ watch(
 }
 .year-total {
   font-weight: 600;
+}
+.buyhedge-view {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.buyhedge-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+.buyhedge-view .summary-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+}
+.buyhedge-view .summary-card h4 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+.buyhedge-view .summary-card ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.buyhedge-view .summary-card li {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+}
+.buyhedge-panels {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+.buyhedge-view .table-wrapper {
+  padding: 12px;
+}
+.buyhedge-view .table-wrapper table {
+  margin-top: 8px;
 }
 </style>

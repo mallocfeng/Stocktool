@@ -101,6 +101,7 @@ class StrategyConfig(BaseModel):
     dca: Optional[Dict[str, float]] = None
     grid: Optional[Dict[str, Any]] = None
     dynamic: Optional[Dict[str, Any]] = None
+    buy_hedge: Optional[Dict[str, Any]] = None
 
 class BacktestRequest(BaseModel):
     csv_path: str
@@ -435,6 +436,12 @@ def serialize_backtest_result(res) -> Dict:
         payload["hedgeMaxInvestmentUsed"] = res.hedge_max_investment_used
     if getattr(res, "dynamic_summary", None):
         payload["dynamicSummary"] = res.dynamic_summary
+    if getattr(res, "buy_hedge_summary", None):
+        payload["buyHedgeSummary"] = res.buy_hedge_summary
+    if getattr(res, "buy_hedge_trades", None):
+        payload["buyHedgeTrades"] = res.buy_hedge_trades
+    if getattr(res, "buy_hedge_events", None):
+        payload["buyHedgeEvents"] = res.buy_hedge_events
     return payload
 
 @app.post("/run_backtest")
@@ -450,6 +457,8 @@ def api_run_backtest(req: BacktestRequest):
         strategies["grid"] = req.strategies.grid
     if req.strategies.dynamic:
         strategies["dynamic"] = req.strategies.dynamic
+    if req.strategies.buy_hedge:
+        strategies["buy_hedge"] = req.strategies.buy_hedge
 
     if not strategies:
         raise HTTPException(status_code=400, detail="No strategies selected")

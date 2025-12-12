@@ -28,6 +28,8 @@ VOLMA20 := MA(VOL,20);
 B_COND := C > MA5 AND MA5 > MA13 AND MA13 > MA34 AND C > REF(C,1) AND VOL > VOLMA5 * 1.2 AND MACD > 0 AND DIF > DEA AND DIF > REF(DIF,1);
 S_COND := C < MA5 OR MACD < 0 OR DIF < DEA;`;
 
+const LOT_SIZE = 100;
+
 const config = reactive({
   csv_path: '',
   formula: DEFAULT_FORMULA,
@@ -37,11 +39,11 @@ const config = reactive({
   strategy_text: '',
   strategies: {
     fixed: { enabled: true, periods: '5,10,20' },
-    tpsl: { enabled: true, tp: 10, sl: 5 },
+    tpsl: { enabled: false, tp: 10, sl: 5 },
     dca: { enabled: false, size: 5, target: 20 },
     grid: { enabled: false, pct: 5, cash: 1000, limit: '', accumulate: true },
     dynamic: {
-      enabled: true,
+      enabled: false,
       lossStepAmount: 10,
       maxAddSteps: 5,
       maxInvestmentLimit: 50000,
@@ -51,6 +53,17 @@ const config = reactive({
       hedgeInitialInvestment: 5000,
       hedgeLossStepAmount: 5,
       hedgeMaxAddSteps: 5,
+    },
+    buyHedge: {
+      enabled: false,
+      stepType: 'percent',
+      stepValue: 3,
+      mode: 'equal',
+      startPosition: 1,
+      incrementUnit: 1,
+      maxAddCount: 5,
+      maxCapital: '',
+      reference: 'last',
     },
   },
 });
@@ -288,6 +301,18 @@ const buildStrategiesPayload = () => {
     const num = Number(input);
     return Number.isFinite(num) ? num : null;
   };
+  const parseMoneyOrPercent = (input) => {
+    if (input === null || input === undefined) return { raw: '', value: null, ratio: null };
+    const raw = String(input).trim();
+    if (!raw) return { raw: '', value: null, ratio: null };
+    if (raw.endsWith('%')) {
+      const num = Number(raw.slice(0, -1));
+      if (Number.isFinite(num)) return { raw, value: null, ratio: num / 100 };
+      return { raw, value: null, ratio: null };
+    }
+    const num = Number(raw);
+    return Number.isFinite(num) ? { raw, value: num, ratio: null } : { raw, value: null, ratio: null };
+  };
   if (config.strategies.fixed.enabled) {
     const parts = config.strategies.fixed.periods
       .split(',')
@@ -335,6 +360,34 @@ const buildStrategiesPayload = () => {
       delete dynamicCfg.maxDrawdownLimit;
     }
     strategies.dynamic = dynamicCfg;
+  }
+  if (config.strategies.buyHedge?.enabled) {
+    const stepRatio = toRatio(config.strategies.buyHedge.stepValue);
+    const startHands = Math.max(0, toNumber(config.strategies.buyHedge.startPosition));
+    const toShares = (hands) => {
+      const normalized = Number.isFinite(hands) ? Math.floor(hands) : 0;
+      if (normalized <= 0) return 0;
+      return normalized * LOT_SIZE;
+    };
+    const startShares = toShares(startHands);
+    if (stepRatio > 0 && startShares >= LOT_SIZE) {
+      const maxCapParsed = parseMoneyOrPercent(config.strategies.buyHedge.maxCapital);
+      const incrementHands = Math.max(0, toNumber(config.strategies.buyHedge.incrementUnit));
+      const incrementShares = toShares(incrementHands);
+      const buyHedgeCfg = {
+        step_type: config.strategies.buyHedge.stepType || 'percent',
+        step_pct: stepRatio,
+        mode: config.strategies.buyHedge.mode || 'equal',
+        start_position: startShares,
+        increment_unit: incrementShares,
+        max_adds: parseInt(config.strategies.buyHedge.maxAddCount, 10) || 0,
+        reference: config.strategies.buyHedge.reference || 'last',
+      };
+      if (maxCapParsed.value != null) buyHedgeCfg.max_capital = maxCapParsed.value;
+      if (maxCapParsed.ratio != null) buyHedgeCfg.max_capital_ratio = maxCapParsed.ratio;
+      if (maxCapParsed.raw) buyHedgeCfg.max_capital_input = maxCapParsed.raw;
+      strategies.buy_hedge = buyHedgeCfg;
+    }
   }
   return strategies;
 };
@@ -485,7 +538,8 @@ const runBacktest = () => {
 
     <section class="form-section">
       <div class="section-title">策略模块</div>
-      <div class="strategy-card dynamic-card">
+      <div class="strategy-group">
+        <div class="strategy-card dynamic-card">
         <label class="checkbox-row">
           <input type="checkbox" v-model="config.strategies.dynamic.enabled" />
           <span>动态资金管理</span>
@@ -539,75 +593,132 @@ const runBacktest = () => {
           </div>
         </div>
       </div>
-      <div class="strategy-card" v-for="module in ['fixed','tpsl','dca','grid']" :key="module">
-        <template v-if="module==='fixed'">
-          <label class="checkbox-row">
-            <input type="checkbox" v-model="config.strategies.fixed.enabled" />
-            <span>固定周期持有</span>
+      <div class="module-divider" role="presentation"></div>
+      <div class="strategy-card buy-hedge-card">
+        <label class="checkbox-row">
+          <input type="checkbox" v-model="config.strategies.buyHedge.enabled" />
+          <span>买入对冲（逢跌加仓）</span>
+        </label>
+        <div class="sub-grid" v-if="config.strategies.buyHedge.enabled">
+          <label class="field">
+            <span>步长类型</span>
+            <select v-model="config.strategies.buyHedge.stepType">
+              <option value="percent">百分比</option>
+            </select>
           </label>
-          <div class="sub-grid" v-if="config.strategies.fixed.enabled">
-            <label class="field">
-              <span>周期（逗号分隔）</span>
-              <input type="text" v-model="config.strategies.fixed.periods" />
-            </label>
-          </div>
-        </template>
-        <template v-else-if="module==='tpsl'">
-          <label class="checkbox-row">
-            <input type="checkbox" v-model="config.strategies.tpsl.enabled" />
-            <span>止盈 / 止损</span>
+          <label class="field">
+            <span>步长 (%)</span>
+            <input type="number" v-model="config.strategies.buyHedge.stepValue" min="0" step="0.1" />
+            <small class="field-hint">价格相对基准下跌达到该比例时触发下一次加仓</small>
           </label>
-          <div class="sub-grid" v-if="config.strategies.tpsl.enabled">
-            <label class="field">
-              <span>止盈 %</span>
-              <input type="number" v-model="config.strategies.tpsl.tp" />
-            </label>
-            <label class="field">
-              <span>止损 %</span>
-              <input type="number" v-model="config.strategies.tpsl.sl" />
-            </label>
-          </div>
-        </template>
-        <template v-else-if="module==='dca'">
-          <label class="checkbox-row">
-            <input type="checkbox" v-model="config.strategies.dca.enabled" />
-            <span>定投模式</span>
+          <label class="field">
+            <span>买入模式</span>
+            <select v-model="config.strategies.buyHedge.mode">
+              <option value="equal">等量</option>
+              <option value="increment">递增</option>
+              <option value="double">加倍</option>
+            </select>
           </label>
-          <div class="sub-grid" v-if="config.strategies.dca.enabled">
-            <label class="field">
-              <span>定投比例 %</span>
-              <input type="number" v-model="config.strategies.dca.size" />
-            </label>
-            <label class="field">
-              <span>目标收益 %</span>
-              <input type="number" v-model="config.strategies.dca.target" />
-            </label>
-          </div>
-        </template>
-        <template v-else>
-          <label class="checkbox-row">
-            <input type="checkbox" v-model="config.strategies.grid.enabled" />
-            <span>网格策略</span>
+          <label class="field">
+            <span>起始仓位（手）</span>
+            <input type="number" v-model="config.strategies.buyHedge.startPosition" min="0" />
           </label>
-          <div class="sub-grid" v-if="config.strategies.grid.enabled">
-            <label class="field">
-              <span>网格 %</span>
-              <input type="number" v-model="config.strategies.grid.pct" />
-            </label>
-            <label class="field">
-              <span>单网资金</span>
-              <input type="number" v-model="config.strategies.grid.cash" />
-            </label>
-            <label class="field">
-              <span>最大网格数</span>
-              <input type="number" v-model="config.strategies.grid.limit" />
-            </label>
+          <label class="field" v-if="config.strategies.buyHedge.mode === 'increment'">
+            <span>递增单位（手）</span>
+            <input type="number" v-model="config.strategies.buyHedge.incrementUnit" min="0" />
+          </label>
+          <label class="field">
+            <span>最大加仓次数</span>
+            <input type="number" v-model="config.strategies.buyHedge.maxAddCount" min="0" />
+            <small class="field-hint">0 表示不限制加仓层数</small>
+          </label>
+          <label class="field">
+            <span>最大资金占用</span>
+            <input type="text" v-model="config.strategies.buyHedge.maxCapital" placeholder="如 50000 或 50%" />
+          </label>
+          <label class="field">
+            <span>触发基准</span>
+            <select v-model="config.strategies.buyHedge.reference">
+              <option value="last">以上一笔买入价</option>
+              <option value="first">以首次买入价</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div class="module-divider" role="presentation"></div>
+      <template v-for="(module, idx) in ['fixed','tpsl','dca','grid']" :key="module">
+        <div class="strategy-card">
+          <template v-if="module==='fixed'">
             <label class="checkbox-row">
-              <input type="checkbox" v-model="config.strategies.grid.accumulate" />
-              <span>累积份额</span>
+              <input type="checkbox" v-model="config.strategies.fixed.enabled" />
+              <span>固定周期持有</span>
             </label>
-          </div>
-        </template>
+            <div class="sub-grid" v-if="config.strategies.fixed.enabled">
+              <label class="field">
+                <span>周期（逗号分隔）</span>
+                <input type="text" v-model="config.strategies.fixed.periods" />
+              </label>
+            </div>
+          </template>
+          <template v-else-if="module==='tpsl'">
+            <label class="checkbox-row">
+              <input type="checkbox" v-model="config.strategies.tpsl.enabled" />
+              <span>止盈 / 止损</span>
+            </label>
+            <div class="sub-grid" v-if="config.strategies.tpsl.enabled">
+              <label class="field">
+                <span>止盈 %</span>
+                <input type="number" v-model="config.strategies.tpsl.tp" />
+              </label>
+              <label class="field">
+                <span>止损 %</span>
+                <input type="number" v-model="config.strategies.tpsl.sl" />
+              </label>
+            </div>
+          </template>
+          <template v-else-if="module==='dca'">
+            <label class="checkbox-row">
+              <input type="checkbox" v-model="config.strategies.dca.enabled" />
+              <span>定投模式</span>
+            </label>
+            <div class="sub-grid" v-if="config.strategies.dca.enabled">
+              <label class="field">
+                <span>定投比例 %</span>
+                <input type="number" v-model="config.strategies.dca.size" />
+              </label>
+              <label class="field">
+                <span>目标收益 %</span>
+                <input type="number" v-model="config.strategies.dca.target" />
+              </label>
+            </div>
+          </template>
+          <template v-else>
+            <label class="checkbox-row">
+              <input type="checkbox" v-model="config.strategies.grid.enabled" />
+              <span>网格策略</span>
+            </label>
+            <div class="sub-grid" v-if="config.strategies.grid.enabled">
+              <label class="field">
+                <span>网格 %</span>
+                <input type="number" v-model="config.strategies.grid.pct" />
+              </label>
+              <label class="field">
+                <span>单网资金</span>
+                <input type="number" v-model="config.strategies.grid.cash" />
+              </label>
+              <label class="field">
+                <span>最大网格数</span>
+                <input type="number" v-model="config.strategies.grid.limit" />
+              </label>
+              <label class="checkbox-row">
+                <input type="checkbox" v-model="config.strategies.grid.accumulate" />
+                <span>累积份额</span>
+              </label>
+            </div>
+          </template>
+        </div>
+        <div v-if="idx < 3" class="module-divider" role="presentation"></div>
+      </template>
       </div>
     </section>
 

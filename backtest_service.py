@@ -14,6 +14,7 @@ from backtesting import (
     backtest_dca_simple,
     backtest_grid_simple,
     backtest_dynamic_capital,
+    backtest_buy_hedge,
 )
 
 
@@ -167,6 +168,14 @@ def _run_backtests(params: BacktestParams, stop_event, emit) -> None:
         emit("log", title)
         res = backtest_dynamic_capital(df, buy, sell, cfg, initial_capital, fee_rate)
         append_result("dynamic_capital", title, res)
+    if "buy_hedge" in strategies:
+        check_cancel()
+        cfg = strategies["buy_hedge"]
+        title = "=== 买入对冲（下跌加仓）策略 ==="
+        emit("log", "")
+        emit("log", title)
+        res = backtest_buy_hedge(df, buy, sell, cfg, initial_capital, fee_rate)
+        append_result("buy_hedge", title, res)
 
     if entries:
         import os  # local import to avoid circular issues
@@ -178,6 +187,12 @@ def _run_backtests(params: BacktestParams, stop_event, emit) -> None:
             entry.result.equity_curve.to_csv(equity_path)
             trades_df = pd.DataFrame([t.__dict__ for t in entry.result.trades])
             trades_df.to_csv(trades_path, index=False)
+            if getattr(entry.result, "buy_hedge_trades", None):
+                buy_hedge_trades_path = os.path.join("results", f"{entry.name}_buy_hedge_trades.csv")
+                pd.DataFrame(entry.result.buy_hedge_trades).to_csv(buy_hedge_trades_path, index=False)
+            if getattr(entry.result, "buy_hedge_events", None):
+                buy_hedge_events_path = os.path.join("results", f"{entry.name}_buy_hedge_events.csv")
+                pd.DataFrame(entry.result.buy_hedge_events).to_csv(buy_hedge_events_path, index=False)
         emit("log", "")
         emit("log", "结果已保存到 ./results 目录下。")
 
