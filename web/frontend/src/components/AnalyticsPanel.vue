@@ -131,22 +131,38 @@ const baseStaticEntry = computed(() => {
   const nonDynamic = props.results.find((entry) => entry.name !== 'dynamic_capital');
   return nonDynamic || props.results[0] || null;
 });
+const dynamicEntry = computed(() => {
+  const explicit = props.results.find((entry) => entry.name === 'dynamic_capital');
+  if (explicit) return explicit;
+  if (currentEntry.value?.result?.dynamicSummary) return currentEntry.value;
+  return null;
+});
 const investmentSeriesMain = computed(
-  () => currentEntry.value?.result?.investmentCurveMain || currentEntry.value?.result?.investmentAmount || []
+  () =>
+    dynamicEntry.value?.result?.investmentCurveMain ||
+    dynamicEntry.value?.result?.investmentAmount ||
+    currentEntry.value?.result?.investmentCurveMain ||
+    currentEntry.value?.result?.investmentAmount ||
+    []
 );
 const investmentSeriesHedge = computed(
-  () => currentEntry.value?.result?.investmentCurveHedge || currentEntry.value?.result?.hedgeInvestmentAmount || []
+  () =>
+    dynamicEntry.value?.result?.investmentCurveHedge ||
+    dynamicEntry.value?.result?.hedgeInvestmentAmount ||
+    currentEntry.value?.result?.investmentCurveHedge ||
+    currentEntry.value?.result?.hedgeInvestmentAmount ||
+    []
 );
-const dynamicDetails = computed(() => currentEntry.value?.result?.positionDetail || []);
-const dynamicTrades = computed(() => currentEntry.value?.result?.trades || []);
-const dynamicSummary = computed(() => currentEntry.value?.result?.dynamicSummary || null);
+const dynamicDetails = computed(() => dynamicEntry.value?.result?.positionDetail || []);
+const dynamicTrades = computed(() => dynamicEntry.value?.result?.trades || []);
+const dynamicSummary = computed(() => dynamicEntry.value?.result?.dynamicSummary || null);
 const buyHedgeSummary = computed(() => currentEntry.value?.result?.buyHedgeSummary || null);
 const buyHedgeTrades = computed(() => currentEntry.value?.result?.buyHedgeTrades || []);
 const buyHedgeEvents = computed(() => currentEntry.value?.result?.buyHedgeEvents || []);
 const equityCurveStatic = computed(() => baseStaticEntry.value?.result?.equity_curve || []);
-const equityCurveDynamic = computed(() => currentEntry.value?.result?.equityCurveWithDynamicFund || []);
+const equityCurveDynamic = computed(() => dynamicEntry.value?.result?.equityCurveWithDynamicFund || []);
 const dynamicForceStop = computed(
-  () => currentEntry.value?.result?.forceStopByDrawdown ?? currentEntry.value?.result?.forceStop ?? false
+  () => dynamicEntry.value?.result?.forceStopByDrawdown ?? dynamicEntry.value?.result?.forceStop ?? false
 );
 const latestInvestment = computed(() =>
   investmentSeriesMain.value.length ? investmentSeriesMain.value[investmentSeriesMain.value.length - 1][1] : 0
@@ -156,7 +172,7 @@ const latestHedge = computed(() =>
 );
 const isDynamicEntry = computed(() => Boolean(dynamicSummary.value));
 const dynamicGateMessage = computed(() => {
-  if (!currentEntry.value) return '请先运行并选择回测结果';
+  if (!props.results.length) return '请先运行并选择回测结果';
   if (!dynamicSummary.value) return '当前策略未启用动态资金管理';
   return '';
 });
@@ -179,8 +195,8 @@ const renderDynamicEquityChart = () => {
   const dynamicSeriesArr = equityCurveDynamic.value?.map(([ts, val]) => [ts, val]) || [];
   dynamicEquityChartInstance.setOption({
     tooltip: { trigger: 'axis' },
-    legend: { data: ['原始权益', '动态权益'], bottom: 0 },
-    grid: { left: 40, right: 20, top: 20, bottom: 40 },
+    legend: { data: ['原始权益', '动态权益'], bottom: 8 },
+    grid: { left: 40, right: 20, top: 20, bottom: 72 },
     xAxis: { type: 'category', data: staticSeries.map((item) => item[0]), boundaryGap: false },
     yAxis: { type: 'value', scale: true },
     series: [
@@ -209,8 +225,8 @@ const renderDynamicInvestmentChart = () => {
   const investHedge = investmentSeriesHedge.value || [];
   dynamicInvestmentChartInstance.setOption({
     tooltip: { trigger: 'item' },
-    legend: { data: ['主方向投入', '对冲投入'], bottom: 0 },
-    grid: { left: 40, right: 20, top: 20, bottom: 40 },
+    legend: { data: ['主方向投入', '对冲投入'], bottom: 8 },
+    grid: { left: 40, right: 20, top: 20, bottom: 72 },
     xAxis: {
       type: 'category',
       boundaryGap: true,
