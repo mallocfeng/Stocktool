@@ -462,7 +462,7 @@ const runBacktest = () => {
           v-model="stockCode"
           placeholder="输入股票代码，例如 600519 或 sh600519"
         />
-        <button class="secondary" type="button" @click="handleFetchFromSina" :disabled="fetching">
+        <button class="fetch-online-button" type="button" @click="handleFetchFromSina" :disabled="fetching">
           {{ fetching ? '读取中…' : '读取在线数据' }}
         </button>
       </div>

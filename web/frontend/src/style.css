@@ -157,6 +157,35 @@ button.secondary {
   border-color: var(--border);
 }
 
+.fetch-online-button {
+  background-color: var(--tone-4, var(--accent-secondary));
+  color: #fff;
+  border: 1px solid transparent;
+  box-shadow: 0 4px 10px rgba(var(--overlay-rgb), 0.15);
+}
+
+.fetch-online-button:hover:not(:disabled) {
+  background-color: var(--tone-4, var(--accent-secondary));
+  opacity: 0.95;
+}
+
+.fetch-online-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+:root[data-theme='dark'] .fetch-online-button {
+  background-color: rgba(var(--tone-4-rgb, 14, 165, 233), 0.35);
+  border-color: rgba(var(--tone-4-rgb, 14, 165, 233), 0.5);
+  color: rgba(226, 232, 240, 0.95);
+}
+
+:root[data-theme='dark'] .fetch-online-button:hover:not(:disabled) {
+  background-color: rgba(var(--tone-4-rgb, 14, 165, 233), 0.45);
+  opacity: 1;
+}
+
 button:disabled,
 button:disabled:hover {
   opacity: 0.6;
