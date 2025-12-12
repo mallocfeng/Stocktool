@@ -29,7 +29,21 @@ const aiError = ref('');
 const datasetSignature = ref('');
 const cachedSignature = ref('');
 const aiCardExpanded = ref(false);
+const overlayBlocking = ref(false);
+const overlayMessage = ref({ title: '', detail: '' });
 let aiTicket = 0;
+
+const overlayActive = computed(() => isRunning.value || overlayBlocking.value);
+const overlayTitle = computed(() => {
+  if (isRunning.value) return '正在处理 CSV / 回测';
+  return overlayMessage.value.title || '数据处理中';
+});
+const overlayDetail = computed(() => {
+  if (isRunning.value) {
+    return '大型文件上传和计算可能需要一点时间，请勿刷新或操作页面…';
+  }
+  return overlayMessage.value.detail || '请勿刷新或关闭页面…';
+});
 
 const aiRenderedHtml = computed(() => {
   const text = aiResult.value?.analysis?.trim();
@@ -97,6 +111,20 @@ const handleDatasetSignature = (data) => {
 onMounted(() => {
   loadPersistedAIInsight();
 });
+
+const handleOverlayBlock = (info) => {
+  const payload = typeof info === 'object' && info !== null ? info : {};
+  overlayBlocking.value = true;
+  overlayMessage.value = {
+    title: payload.title || '数据处理中',
+    detail: payload.detail || '请勿刷新或关闭页面…',
+  };
+};
+
+const handleOverlayUnblock = () => {
+  overlayBlocking.value = false;
+  overlayMessage.value = { title: '', detail: '' };
+};
 
 const handleRun = async (configPayload) => {
   if (!configPayload || !configPayload.payload) return;
@@ -190,6 +218,18 @@ const handleAIMouseLeave = () => {
 
 <template>
   <div class="app-shell">
+    <transition name="fade">
+      <div v-if="overlayActive" class="global-overlay" aria-live="assertive">
+        <div class="overlay-card">
+          <div class="overlay-spinner" aria-hidden="true"></div>
+          <div class="overlay-text">
+            <strong>{{ overlayTitle }}</strong>
+            <p>{{ overlayDetail }}</p>
+          </div>
+        </div>
+      </div>
+    </transition>
+
     <header class="app-header">
       <div>
         <h1>StockTool 云端量化</h1>
@@ -200,7 +240,12 @@ const handleAIMouseLeave = () => {
 
     <main class="app-main">
       <aside class="sidebar">
-        <ConfigPanel :busy="isRunning" @run="handleRun" />
+        <ConfigPanel
+          :busy="isRunning"
+          @run="handleRun"
+          @block="handleOverlayBlock"
+          @unblock="handleOverlayUnblock"
+        />
         <section class="card log-panel">
           <div class="panel-header">
             <h3>运行日志</h3>

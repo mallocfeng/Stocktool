@@ -7,7 +7,7 @@ const props = defineProps({
   busy: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['run']);
+const emit = defineEmits(['run', 'block', 'unblock']);
 let importTicket = 0;
 
 const DEFAULT_FORMULA = `SHORT := EMA(CLOSE,12);
@@ -68,6 +68,10 @@ const handleFileUpload = async (event) => {
   const formData = new FormData();
   formData.append('file', file);
   uploading.value = true;
+  emit('block', {
+    title: '正在上传 CSV 文件',
+    detail: '大文件上传可能需要较长时间，请勿刷新或重复操作…',
+  });
   try {
     const res = await axios.post('/upload', formData);
     if (ticket !== importTicket) return;
@@ -79,6 +83,7 @@ const handleFileUpload = async (event) => {
     alert('上传失败：' + (e.response?.data?.detail || e.message));
   } finally {
     uploading.value = false;
+    emit('unblock');
   }
 };
 
@@ -90,6 +95,10 @@ const handleFetchFromSina = async () => {
   }
   const ticket = ++importTicket;
   fetching.value = true;
+  emit('block', {
+    title: '正在从新浪下载行情',
+    detail: '网络行情加载需要一些时间，请耐心等待完成…',
+  });
   try {
     const res = await axios.post('/import/sina', { symbol: code });
     if (ticket !== importTicket) return;
@@ -100,6 +109,7 @@ const handleFetchFromSina = async () => {
     alert('读取失败：' + (e.response?.data?.detail || e.message));
   } finally {
     fetching.value = false;
+    emit('unblock');
   }
 };
 
