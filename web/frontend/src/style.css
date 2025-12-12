@@ -1010,6 +1010,17 @@ label {
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.85), var(--card-accent));
 }
 
+:root[data-theme='dark'] .category-card {
+  background: rgba(var(--category-accent-rgb, 255, 255, 255), 0.18);
+  border: 1px solid rgba(var(--category-accent-rgb, 255, 255, 255), 0.25);
+}
+
+:root[data-theme='dark'] .category-card.active {
+  background: linear-gradient(135deg, rgba(var(--category-accent-rgb, 255, 255, 255), 0.45), var(--card-accent));
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  border-color: rgba(var(--category-accent-rgb, 255, 255, 255), 0.7);
+}
+
 .category-card:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12);
@@ -1027,6 +1038,7 @@ label {
 
 :root[data-theme='dark'] .category-card {
   background: rgba(var(--category-accent-rgb, 255, 255, 255), 0.22);
+  border-color: rgba(var(--category-accent-rgb, 255, 255, 255), 0.35);
 }
 
 :root[data-theme='dark'] .category-card::before {
