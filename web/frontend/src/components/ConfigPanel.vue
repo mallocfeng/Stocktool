@@ -599,50 +599,65 @@ const runBacktest = () => {
           <input type="checkbox" v-model="config.strategies.buyHedge.enabled" />
           <span>买入对冲（逢跌加仓）</span>
         </label>
-        <div class="sub-grid" v-if="config.strategies.buyHedge.enabled">
-          <label class="field">
-            <span>步长类型</span>
-            <select v-model="config.strategies.buyHedge.stepType">
-              <option value="percent">百分比</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>步长 (%)</span>
-            <input type="number" v-model="config.strategies.buyHedge.stepValue" min="0" step="0.1" />
-            <small class="field-hint">价格相对基准下跌达到该比例时触发下一次加仓</small>
-          </label>
-          <label class="field">
-            <span>买入模式</span>
-            <select v-model="config.strategies.buyHedge.mode">
-              <option value="equal">等量</option>
-              <option value="increment">递增</option>
-              <option value="double">加倍</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>起始仓位（手）</span>
-            <input type="number" v-model="config.strategies.buyHedge.startPosition" min="0" />
-          </label>
-          <label class="field" v-if="config.strategies.buyHedge.mode === 'increment'">
-            <span>递增单位（手）</span>
-            <input type="number" v-model="config.strategies.buyHedge.incrementUnit" min="0" />
-          </label>
-          <label class="field">
-            <span>最大加仓次数</span>
-            <input type="number" v-model="config.strategies.buyHedge.maxAddCount" min="0" />
-            <small class="field-hint">0 表示不限制加仓层数</small>
-          </label>
-          <label class="field">
-            <span>最大资金占用</span>
-            <input type="text" v-model="config.strategies.buyHedge.maxCapital" placeholder="如 50000 或 50%" />
-          </label>
-          <label class="field">
-            <span>触发基准</span>
-            <select v-model="config.strategies.buyHedge.reference">
-              <option value="last">以上一笔买入价</option>
-              <option value="first">以首次买入价</option>
-            </select>
-          </label>
+        <div class="buyhedge-sections" v-if="config.strategies.buyHedge.enabled">
+          <div class="buyhedge-section">
+            <div class="buyhedge-section__title">触发条件</div>
+            <div class="sub-grid">
+              <label class="field">
+                <span>步长类型</span>
+                <select v-model="config.strategies.buyHedge.stepType">
+                  <option value="percent">百分比</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>步长 (%)</span>
+                <input type="number" v-model="config.strategies.buyHedge.stepValue" min="0" step="0.1" />
+              </label>
+            </div>
+            <p class="field-note">价格相对基准下跌达到该比例时触发下一次加仓</p>
+          </div>
+          <div class="buyhedge-section">
+            <div class="buyhedge-section__title">仓位配置</div>
+            <div class="sub-grid">
+              <label class="field">
+                <span>买入模式</span>
+                <select v-model="config.strategies.buyHedge.mode">
+                  <option value="equal">等量</option>
+                  <option value="increment">递增</option>
+                  <option value="double">加倍</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>起始仓位（手）</span>
+                <input type="number" v-model="config.strategies.buyHedge.startPosition" min="0" />
+              </label>
+              <label class="field" v-if="config.strategies.buyHedge.mode === 'increment'">
+                <span>递增单位（手）</span>
+                <input type="number" v-model="config.strategies.buyHedge.incrementUnit" min="0" />
+              </label>
+            </div>
+          </div>
+          <div class="buyhedge-section">
+            <div class="buyhedge-section__title">风险限制</div>
+            <div class="sub-grid">
+              <label class="field">
+                <span>最大加仓次数</span>
+                <input type="number" v-model="config.strategies.buyHedge.maxAddCount" min="0" />
+                <small class="field-hint">0 表示不限制加仓层数</small>
+              </label>
+              <label class="field">
+                <span>最大资金占用</span>
+                <input type="text" v-model="config.strategies.buyHedge.maxCapital" placeholder="如 50000 或 50%" />
+              </label>
+              <label class="field">
+                <span>触发基准</span>
+                <select v-model="config.strategies.buyHedge.reference">
+                  <option value="last">以上一笔买入价</option>
+                  <option value="first">以首次买入价</option>
+                </select>
+              </label>
+            </div>
+          </div>
         </div>
       </div>
       <div class="module-divider" role="presentation"></div>

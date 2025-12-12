@@ -718,6 +718,38 @@ label {
   margin: 8px 0 14px;
 }
 
+.buyhedge-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.buyhedge-section {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+:root[data-theme='light'] .buyhedge-section {
+  border-color: rgba(99, 102, 241, 0.25);
+  background: rgba(99, 102, 241, 0.06);
+}
+
+.buyhedge-section__title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+}
+
+.field-note {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin: 6px 0 0;
+}
+
 .checkbox-row {
   display: flex;
   align-items: center;
