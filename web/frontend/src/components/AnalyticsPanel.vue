@@ -44,6 +44,8 @@ const multiMessage = ref('');
 const scoreChartRef = ref(null);
 const dynamicEquityChartRef = ref(null);
 const dynamicInvestmentChartRef = ref(null);
+const buyHedgePriceChartRef = ref(null);
+const buyHedgeImpactChartRef = ref(null);
 const reportData = ref(null);
 const reportLoading = ref(false);
 const reportError = ref('');
@@ -52,6 +54,8 @@ let scoreChartInstance = null;
 let dynamicEquityChartInstance = null;
 let dynamicInvestmentChartInstance = null;
 let reportChartInstance = null;
+let buyHedgePriceChartInstance = null;
+let buyHedgeImpactChartInstance = null;
 const selectedResultIndex = ref(0);
 const reportDirty = ref(true);
 
@@ -177,6 +181,159 @@ const dynamicGateMessage = computed(() => {
   return '';
 });
 
+const renderBuyHedgePriceChart = () => {
+  const formatPrice = (val) => {
+    const num = Number(val);
+    if (!Number.isFinite(num)) return '--';
+    return num.toFixed(2);
+  };
+  const dom = buyHedgePriceChartRef.value;
+  if (!dom || !buyHedgeEvents.value.length) {
+    buyHedgePriceChartInstance?.dispose();
+    buyHedgePriceChartInstance = null;
+    return;
+  }
+  if (buyHedgePriceChartInstance && buyHedgePriceChartInstance.getDom() !== dom) {
+    buyHedgePriceChartInstance.dispose();
+    buyHedgePriceChartInstance = null;
+  }
+  if (!buyHedgePriceChartInstance) {
+    buyHedgePriceChartInstance = echarts.init(dom, currentThemeName.value);
+  }
+  const dates = buyHedgeEvents.value.map((evt) => evt.date);
+  const priceLine = buyHedgeEvents.value.map((evt) => evt.price ?? null);
+  const costLine = buyHedgeEvents.value.map((evt) => evt.avg_cost ?? null);
+  const triggerLine = buyHedgeEvents.value.map((evt) => {
+    if (evt.trigger_price != null) return evt.trigger_price;
+    if (evt.type === 'entry') return evt.price ?? null;
+    return null;
+  });
+  const totalShares = buyHedgeEvents.value.map((evt) =>
+    evt.total_shares != null ? Math.round(evt.total_shares) : null
+  );
+  const scatterPoints = buyHedgeEvents.value.map((evt) => ({
+    value: [evt.date, evt.price],
+    layer: evt.layer,
+    type: buyHedgeEventLabel(evt.type),
+  }));
+  const eventColors = {
+    首次买入: '#60a5fa',
+    加仓: '#22c55e',
+    跳过: '#f97316',
+    记录: '#94a3b8',
+  };
+  const eventMarkers = scatterPoints.map((pt) => ({
+    coord: pt.value,
+    itemStyle: { color: eventColors[pt.type] || '#60a5fa' },
+    label: { show: false },
+  }));
+  const priceDiff = priceLine.map((price, idx) => {
+    const cost = costLine[idx];
+    if (price == null || cost == null) return null;
+    return Number(((price - cost) * 100).toFixed(2));
+  });
+  buyHedgePriceChartInstance.setOption({
+    tooltip: {
+      trigger: 'axis',
+      formatter: (items = []) => {
+        if (!items.length) return '';
+        const label = items[0].axisValue;
+        const lines = [label];
+        const scatterItem = scatterPoints.find((pt) => pt.value[0] === label);
+        if (scatterItem) {
+          lines.push(`事件：${scatterItem.type}`);
+          if (scatterItem.layer != null) lines.push(`层级：${scatterItem.layer}`);
+        }
+        items.forEach((item) => {
+          const val = Array.isArray(item.value) ? item.value[1] : item.value;
+          lines.push(`${item.marker} ${item.seriesName}：${formatPrice(val)}`);
+        });
+        const qty = totalShares[items[0].dataIndex];
+        if (qty != null) lines.push(`持仓：${qty} 手`);
+        return lines.join('<br/>');
+      },
+    },
+    legend: { data: ['触发价', '事件价格', '持仓均价', '持仓数量', '价差(分)'], bottom: 12 },
+    grid: { left: 50, right: 20, top: 20, bottom: 110 },
+    xAxis: { type: 'category', boundaryGap: false, data: dates, axisLabel: { margin: 18 } },
+    yAxis: [
+      { type: 'value', name: '价格', scale: true },
+      { type: 'value', name: '持仓（手）', scale: true, splitLine: { show: false }, position: 'right' },
+      { type: 'value', name: '价差(分)', scale: true, splitLine: { show: false }, position: 'right', offset: 60 },
+    ],
+    series: [
+      { name: '触发价', type: 'line', data: triggerLine, smooth: true },
+      {
+        name: '事件价格',
+        type: 'line',
+        data: priceLine,
+        smooth: true,
+        markPoint: { symbol: 'circle', symbolSize: 10, data: eventMarkers },
+      },
+      { name: '持仓均价', type: 'line', data: costLine, smooth: true },
+      {
+        name: '持仓数量',
+        type: 'bar',
+        data: totalShares,
+        yAxisIndex: 1,
+        itemStyle: { opacity: 0.4 },
+        barWidth: 10,
+      },
+      {
+        name: '价差(分)',
+        type: 'line',
+        yAxisIndex: 2,
+        data: priceDiff,
+        smooth: true,
+        lineStyle: { type: 'dashed' },
+      },
+    ],
+  });
+  buyHedgePriceChartInstance.resize();
+};
+
+const renderBuyHedgeImpactChart = () => {
+  const dom = buyHedgeImpactChartRef.value;
+  if (!dom || !buyHedgeTrades.value.length) {
+    buyHedgeImpactChartInstance?.dispose();
+    buyHedgeImpactChartInstance = null;
+    return;
+  }
+  if (buyHedgeImpactChartInstance && buyHedgeImpactChartInstance.getDom() !== dom) {
+    buyHedgeImpactChartInstance.dispose();
+    buyHedgeImpactChartInstance = null;
+  }
+  if (!buyHedgeImpactChartInstance) {
+    buyHedgeImpactChartInstance = echarts.init(dom, currentThemeName.value);
+  }
+  const categories = buyHedgeTrades.value.map((trade, idx) => trade.entry_date || `#${idx + 1}`);
+  const costImpact = buyHedgeTrades.value.map((trade) => (trade.avg_cost_delta_pct ?? 0) * 100);
+  const pnlImpact = buyHedgeTrades.value.map((trade) => (trade.return_pct ?? 0) * 100);
+  buyHedgeImpactChartInstance.setOption({
+    tooltip: {
+      trigger: 'axis',
+      formatter: (items = []) => {
+        if (!items.length) return '';
+        const label = items[0].axisValue;
+        const lines = [label];
+        items.forEach((item) => {
+          lines.push(`${item.marker} ${item.seriesName}：${item.value.toFixed(2)}%`);
+        });
+        return lines.join('<br/>');
+      },
+    },
+    legend: { data: ['摊低成本', '收益率'], bottom: 12 },
+    grid: { left: 50, right: 20, top: 20, bottom: 120 },
+    xAxis: { type: 'category', data: categories, axisLabel: { rotate: 35 } },
+    yAxis: { type: 'value', name: '%', scale: true },
+    series: [
+      { name: '摊低成本', type: 'bar', data: costImpact, itemStyle: { opacity: 0.8 } },
+      { name: '收益率', type: 'line', data: pnlImpact, smooth: true },
+    ],
+  });
+  buyHedgeImpactChartInstance.resize();
+};
+
 const renderDynamicEquityChart = () => {
   const dom = dynamicEquityChartRef.value;
   if (!dom || !dynamicSummary.value) {
@@ -195,9 +352,14 @@ const renderDynamicEquityChart = () => {
   const dynamicSeriesArr = equityCurveDynamic.value?.map(([ts, val]) => [ts, val]) || [];
   dynamicEquityChartInstance.setOption({
     tooltip: { trigger: 'axis' },
-    legend: { data: ['原始权益', '动态权益'], bottom: 8 },
-    grid: { left: 40, right: 20, top: 20, bottom: 72 },
-    xAxis: { type: 'category', data: staticSeries.map((item) => item[0]), boundaryGap: false },
+    legend: { data: ['原始权益', '动态权益'], bottom: 12 },
+    grid: { left: 40, right: 20, top: 20, bottom: 92 },
+    xAxis: {
+      type: 'category',
+      data: staticSeries.map((item) => item[0]),
+      boundaryGap: false,
+      axisLabel: { margin: 12 },
+    },
     yAxis: { type: 'value', scale: true },
     series: [
       { name: '原始权益', type: 'line', smooth: true, data: staticSeries.map((item) => item[1]) },
@@ -225,13 +387,13 @@ const renderDynamicInvestmentChart = () => {
   const investHedge = investmentSeriesHedge.value || [];
   dynamicInvestmentChartInstance.setOption({
     tooltip: { trigger: 'item' },
-    legend: { data: ['主方向投入', '对冲投入'], bottom: 8 },
-    grid: { left: 40, right: 20, top: 20, bottom: 72 },
+    legend: { data: ['主方向投入', '对冲投入'], bottom: 12 },
+    grid: { left: 40, right: 20, top: 20, bottom: 90 },
     xAxis: {
       type: 'category',
       boundaryGap: true,
       data: investMain.map((item, idx) => item[0] || `T${idx + 1}`),
-      axisLabel: { hideOverlap: true },
+      axisLabel: { hideOverlap: true, margin: 12 },
     },
     yAxis: { type: 'value', scale: true },
     series: [
@@ -534,7 +696,29 @@ watch(
       fetchReport();
     }
     if (activeTab.value === 'buyhedge') {
-      nextTick(() => selectBuyHedgeEntryIfAvailable());
+      nextTick(() => {
+        selectBuyHedgeEntryIfAvailable();
+        renderBuyHedgePriceChart();
+        renderBuyHedgeImpactChart();
+      });
+    }
+  }
+);
+
+watch(
+  () => [buyHedgeEvents.value, props.theme],
+  () => {
+    if (activeTab.value === 'buyhedge') {
+      nextTick(() => renderBuyHedgePriceChart());
+    }
+  }
+);
+
+watch(
+  () => [buyHedgeTrades.value, props.theme],
+  () => {
+    if (activeTab.value === 'buyhedge') {
+      nextTick(() => renderBuyHedgeImpactChart());
     }
   }
 );
@@ -556,10 +740,14 @@ const disposeCharts = () => {
   dynamicEquityChartInstance?.dispose();
   dynamicInvestmentChartInstance?.dispose();
   reportChartInstance?.dispose();
+  buyHedgePriceChartInstance?.dispose();
+  buyHedgeImpactChartInstance?.dispose();
   scoreChartInstance = null;
   dynamicEquityChartInstance = null;
   dynamicInvestmentChartInstance = null;
   reportChartInstance = null;
+  buyHedgePriceChartInstance = null;
+  buyHedgeImpactChartInstance = null;
 };
 
 watch(
@@ -574,6 +762,10 @@ watch(
         renderDynamicEquityChart();
         renderDynamicInvestmentChart();
       }
+      if (activeTab.value === 'buyhedge') {
+        renderBuyHedgePriceChart();
+        renderBuyHedgeImpactChart();
+      }
       if (activeTab.value === 'report' && reportDrawdownSeries.value.length) {
         renderReportDrawdown();
       }
@@ -586,6 +778,8 @@ const handleResize = () => {
   dynamicEquityChartInstance?.resize();
   dynamicInvestmentChartInstance?.resize();
   reportChartInstance?.resize();
+  buyHedgePriceChartInstance?.resize();
+  buyHedgeImpactChartInstance?.resize();
 };
 
 onMounted(() => {
@@ -601,6 +795,10 @@ const switchTab = (tab) => {
   activeTab.value = tab;
   if (tab === 'buyhedge') {
     selectBuyHedgeEntryIfAvailable();
+    nextTick(() => {
+      renderBuyHedgePriceChart();
+      renderBuyHedgeImpactChart();
+    });
   }
   if (!props.hasData || tab === 'results') return;
   if (tab === 'scores') {
@@ -1026,6 +1224,22 @@ const isCategoryDisabled = (key) => {
       <section v-else-if="activeTab === 'buyhedge'">
         <div v-if="!buyHedgeSummary" class="empty">当前策略未启用买入对冲模块</div>
         <div v-else class="buyhedge-view">
+          <div class="buyhedge-charts">
+            <div class="buyhedge-chart-card">
+              <div class="panel-header">
+                <h4>买入轨迹</h4>
+                <span>事件价格 / 持仓均价 / 持仓数量</span>
+              </div>
+              <div ref="buyHedgePriceChartRef" class="buyhedge-chart"></div>
+            </div>
+            <div class="buyhedge-chart-card">
+              <div class="panel-header">
+                <h4>加仓效果</h4>
+                <span>摊低成本 vs 收益率</span>
+              </div>
+              <div ref="buyHedgeImpactChartRef" class="buyhedge-chart"></div>
+            </div>
+          </div>
           <div class="buyhedge-summary-grid">
             <div class="summary-card">
               <h4>参数配置</h4>
@@ -1627,5 +1841,21 @@ const isCategoryDisabled = (key) => {
 }
 .buyhedge-view .table-wrapper table {
   margin-top: 8px;
+}
+.buyhedge-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+.buyhedge-chart-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  background: var(--card-bg);
+  min-height: 360px;
+}
+.buyhedge-chart {
+  width: 100%;
+  height: 320px;
 }
 </style>
