@@ -8,7 +8,7 @@ import pandas as pd
 from pandas.tseries.frequencies import to_offset
 
 from formula_engine import TdxFormulaEngine
-from backtesting import BacktestResult
+from backtesting import BacktestResult, Trade
 
 
 def _resample_ohlc(df: pd.DataFrame, freq: str) -> pd.DataFrame:
@@ -122,6 +122,125 @@ def _format_duration(ns: Optional[int]) -> Optional[str]:
         return f"{int(round(weeks))}W"
     months = days / 30
     return f"{int(round(months))}M"
+
+
+def _estimate_periods_per_year(index: pd.DatetimeIndex) -> float:
+    if not isinstance(index, pd.DatetimeIndex) or len(index) < 2:
+        return 252.0
+    sorted_index = index.sort_values()
+    deltas = sorted_index.to_series().diff().dropna().dt.total_seconds()
+    if deltas.empty:
+        return 252.0
+    median_seconds = deltas.median()
+    if median_seconds <= 0:
+        return 252.0
+    seconds_per_year = 365 * 24 * 3600
+    periods = seconds_per_year / median_seconds
+    return max(1.0, min(10000.0, periods))
+
+
+def _compute_drawdown_series(equity: pd.Series) -> pd.Series:
+    running_max = equity.cummax()
+    drawdown = equity / running_max - 1.0
+    return drawdown.fillna(0.0)
+
+
+def _compute_sharpe(returns: pd.Series, periods_per_year: float) -> float:
+    if returns.empty:
+        return 0.0
+    mean_ret = returns.mean()
+    std_ret = returns.std(ddof=0)
+    if std_ret == 0:
+        return 0.0
+    return float((mean_ret / std_ret) * np.sqrt(periods_per_year))
+
+
+def _compute_sortino(returns: pd.Series, periods_per_year: float) -> float:
+    if returns.empty:
+        return 0.0
+    downside = returns[returns < 0]
+    if downside.empty:
+        return 0.0
+    downside_std = np.sqrt((downside**2).mean())
+    if downside_std == 0:
+        return 0.0
+    return float((returns.mean() / downside_std) * np.sqrt(periods_per_year))
+
+
+def _annual_returns(equity: pd.Series) -> List[Dict[str, float]]:
+    annual = equity.resample("Y").last()
+    annual_ret = annual.pct_change().dropna()
+    results = []
+    for idx, value in annual_ret.items():
+        results.append({"year": int(idx.year), "return_pct": round(float(value) * 100, 2)})
+    return results
+
+
+def _monthly_matrix(equity: pd.Series) -> Dict[str, Dict[str, float]]:
+    monthly = equity.resample("M").last()
+    monthly_ret = monthly.pct_change().dropna()
+    matrix: Dict[str, Dict[str, float]] = {}
+    for idx, value in monthly_ret.items():
+        year = str(idx.year)
+        month = f"{idx.month:02d}"
+        matrix.setdefault(year, {})[month] = round(float(value) * 100, 2)
+    return matrix
+
+
+def _trade_statistics(trades: List[Trade]) -> Dict[str, float]:
+    returns = [t.return_pct for t in trades]
+    wins = [r for r in returns if r > 0]
+    losses = [r for r in returns if r <= 0]
+    win_rate = len(wins) / len(returns) if returns else 0.0
+    avg_win = float(np.mean(wins)) if wins else 0.0
+    avg_loss = float(np.mean(losses)) if losses else 0.0
+    profit_factor = 0.0
+    if wins and losses:
+        profit = sum(wins)
+        loss = abs(sum(losses))
+        profit_factor = float(profit / loss) if loss else 0.0
+    return {
+        "win_rate_pct": round(win_rate * 100, 2),
+        "avg_win_pct": round(avg_win * 100, 2),
+        "avg_loss_pct": round(avg_loss * 100, 2),
+        "profit_factor": round(profit_factor, 2),
+    }
+
+
+def generate_performance_report(result: BacktestResult) -> Dict[str, object]:
+    equity = result.equity_curve.copy()
+    equity.index = pd.to_datetime(equity.index)
+    returns = equity.pct_change().dropna()
+    periods_per_year = _estimate_periods_per_year(equity.index)
+    sharpe = _compute_sharpe(returns, periods_per_year)
+    sortino = _compute_sortino(returns, periods_per_year)
+    drawdown = _compute_drawdown_series(equity)
+    summary = {
+        "total_return_pct": round(result.total_return * 100, 2),
+        "annualized_return_pct": round(result.annualized_return * 100, 2),
+        "sharpe": round(sharpe, 2),
+        "sortino": round(sortino, 2),
+        "max_drawdown_pct": round(result.max_drawdown * 100, 2),
+        "win_rate_pct": round(result.win_rate * 100, 2),
+        "avg_win_pct": round(result.avg_win * 100, 2),
+        "avg_loss_pct": round(result.avg_loss * 100, 2),
+    }
+    if result.trades:
+        summary.update(_trade_statistics(result.trades))
+    annual = _annual_returns(equity)
+    monthly = _monthly_matrix(equity)
+    drawdown_series = [
+        {"date": str(idx), "value": round(float(val) * 100, 2)}
+        for idx, val in drawdown.tail(600).items()
+    ]
+    monthly_order = [f"{i:02d}" for i in range(1, 13)]
+    return {
+        "summary": summary,
+        "annual_returns": annual,
+        "monthly_matrix": monthly,
+        "monthly_order": monthly_order,
+        "drawdown_series": drawdown_series,
+    }
 
 
 def _recommended_freqs(base_ns: Optional[int]) -> List[str]:

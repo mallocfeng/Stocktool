@@ -26,6 +26,7 @@ from analytics import (
     generate_daily_brief,
     simple_rule_based_formula,
     normalize_timeframe_token,
+    generate_performance_report,
 )
 # We might need to adjust plotting functions to return data instead of calling plt.show()
 # For now, let's just focus on data endpoints.
@@ -140,6 +141,10 @@ class TimeframePairRequest(BaseModel):
 
 
 MultiTimeframeRequest.model_rebuild()
+
+
+class ReportRequest(BaseModel):
+    strategy_index: int = 0
 
 # --- External Data Helpers ---
 
@@ -747,6 +752,20 @@ def generate_formula(req: StrategyTextRequest):
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc))
     return {"formula": formula}
+
+
+@app.post("/analytics/performance_report")
+def get_performance_report(req: ReportRequest):
+    if not state.results:
+        raise HTTPException(status_code=400, detail="请先运行回测")
+    idx = max(0, min(req.strategy_index, len(state.results) - 1))
+    entry = state.results[idx]
+    try:
+        report = generate_performance_report(entry.result)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"无法生成报告：{exc}") from exc
+    report["strategy"] = {"name": entry.name, "title": entry.title}
+    return report
 
 
 @app.post("/analytics/ai_insight")

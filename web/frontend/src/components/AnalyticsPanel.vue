@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, nextTick, onBeforeUnmount, computed } from 'vue';
+import { ref, watch, nextTick, onBeforeUnmount, onMounted, computed } from 'vue';
 import axios from 'axios';
 import * as echarts from 'echarts';
 import SignalChart from './SignalChart.vue';
@@ -20,6 +20,7 @@ const categories = [
   { key: 'stop', title: '止盈止损', desc: 'ATR 建议价位' },
   { key: 'heatmap', title: '收益热力图', desc: '持有周期 VS 收益' },
   { key: 'multi', title: '多周期信号', desc: '不同周期买卖提示' },
+  { key: 'report', title: '专业回测报告', desc: '高级绩效指标' },
   { key: 'brief', title: '复盘摘要', desc: '自动生成复盘语句' },
   { key: 'dynamic', title: '资金管理', desc: '投入/对冲轨迹' },
 ];
@@ -40,9 +41,15 @@ const multiMessage = ref('');
 const scoreChartRef = ref(null);
 const dynamicEquityChartRef = ref(null);
 const dynamicInvestmentChartRef = ref(null);
+const reportData = ref(null);
+const reportLoading = ref(false);
+const reportError = ref('');
+const reportChartRef = ref(null);
 let scoreChartInstance = null;
 let dynamicEquityChartInstance = null;
 let dynamicInvestmentChartInstance = null;
+let reportChartInstance = null;
+const selectedResultIndex = ref(0);
 
 const normalizeFreqToken = (value) => {
   if (!value) return '';
@@ -84,6 +91,15 @@ const buildMultiRequestPayload = () => {
 
 const selectResult = (entry) => {
   selectedResult.value = entry.name;
+  const idx = props.results.findIndex((item) => item.name === entry.name);
+  if (idx >= 0) {
+    selectedResultIndex.value = idx;
+    reportData.value = null;
+    reportError.value = '';
+    if (activeTab.value === 'report' && props.hasData) {
+      fetchReport();
+    }
+  }
   emit('selectStrategy', entry);
 };
 
@@ -197,7 +213,12 @@ watch(
   (entries) => {
     if (entries && entries.length) {
       const dynamicEntry = entries.find((item) => item.name === 'dynamic_capital');
-      selectedResult.value = (dynamicEntry || entries[0]).name;
+      const target = dynamicEntry || entries[0];
+      selectedResult.value = target.name;
+      selectedResultIndex.value = entries.indexOf(target);
+      if (selectedResultIndex.value < 0) selectedResultIndex.value = 0;
+      reportData.value = null;
+      reportError.value = '';
     }
   },
   { immediate: true }
@@ -247,6 +268,26 @@ const fetchPlan = async () => {
     planMessage.value = '请求失败';
   } finally {
     loading.value = false;
+  }
+};
+
+const fetchReport = async () => {
+  reportLoading.value = true;
+  reportError.value = '';
+  try {
+    const res = await axios.post('/analytics/performance_report', {
+      strategy_index: selectedResultIndex.value || 0,
+    });
+    reportData.value = res.data || null;
+  } catch (e) {
+    console.error(e);
+    reportError.value = e.response?.data?.detail || '报告获取失败';
+  } finally {
+    reportLoading.value = false;
+    await nextTick();
+    if (activeTab.value === 'report' && !reportError.value && reportData.value) {
+      renderReportDrawdown();
+    }
   }
 };
 
@@ -367,6 +408,45 @@ const renderScoreChart = () => {
   scoreChartInstance.resize();
 };
 
+const renderReportDrawdown = () => {
+  const dom = reportChartRef.value;
+  const series = reportDrawdownSeries.value || [];
+  if (!dom || !series.length) {
+    reportChartInstance?.dispose();
+    reportChartInstance = null;
+    return;
+  }
+  if (reportChartInstance && reportChartInstance.getDom() !== dom) {
+    reportChartInstance.dispose();
+    reportChartInstance = null;
+  }
+  if (!reportChartInstance) {
+    reportChartInstance = echarts.init(dom, 'dark');
+  }
+  const dates = series.map((item) => item.date);
+  const values = series.map((item) => item.value);
+  reportChartInstance.setOption({
+    grid: { left: 45, right: 10, top: 20, bottom: 30 },
+    tooltip: { trigger: 'axis', valueFormatter: (val) => `${val?.toFixed?.(2) ?? val}%` },
+    xAxis: { type: 'category', data: dates, boundaryGap: false },
+    yAxis: {
+      type: 'value',
+      axisLabel: { formatter: '{value}%' },
+      splitLine: { lineStyle: { color: '#374151' } },
+    },
+    series: [
+      {
+        type: 'line',
+        data: values,
+        smooth: true,
+        lineStyle: { color: '#f87171' },
+        areaStyle: { opacity: 0.2, color: '#f87171' },
+      },
+    ],
+  });
+  reportChartInstance.resize();
+};
+
 watch(
   () => [currentEntry.value, investmentSeriesMain.value, investmentSeriesHedge.value, equityCurveStatic.value, equityCurveDynamic.value],
   () => {
@@ -398,6 +478,22 @@ watch(
     if (activeTab.value === 'multi' && props.hasData) {
       fetchMulti();
     }
+    reportData.value = null;
+    reportError.value = '';
+    if (activeTab.value === 'report' && props.hasData) {
+      fetchReport();
+    }
+  }
+);
+
+watch(
+  () => selectedResultIndex.value,
+  () => {
+    reportData.value = null;
+    reportError.value = '';
+    if (activeTab.value === 'report' && props.hasData) {
+      fetchReport();
+    }
   }
 );
 
@@ -405,12 +501,26 @@ const disposeCharts = () => {
   scoreChartInstance?.dispose();
   dynamicEquityChartInstance?.dispose();
   dynamicInvestmentChartInstance?.dispose();
+  reportChartInstance?.dispose();
   scoreChartInstance = null;
   dynamicEquityChartInstance = null;
   dynamicInvestmentChartInstance = null;
+  reportChartInstance = null;
 };
 
+const handleResize = () => {
+  scoreChartInstance?.resize();
+  dynamicEquityChartInstance?.resize();
+  dynamicInvestmentChartInstance?.resize();
+  reportChartInstance?.resize();
+};
+
+onMounted(() => {
+  window.addEventListener('resize', handleResize);
+});
+
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleResize);
   disposeCharts();
 });
 
@@ -437,6 +547,13 @@ const switchTab = (tab) => {
       renderDynamicInvestmentChart();
     });
   }
+  if (tab === 'report') {
+    if (!reportData.value && !reportLoading.value) {
+      fetchReport();
+    } else {
+      nextTick(() => renderReportDrawdown());
+    }
+  }
 };
 
 const heatmapValue = (xIdx, yIdx) => heatmapLookup.value[`${xIdx}-${yIdx}`] ?? 0;
@@ -450,6 +567,41 @@ const formatDrawdown = (val) => {
   return formatAmount(num);
 };
 const formatBoolean = (val) => (val ? '是' : '否');
+const displayPercent = (val) => (Number.isFinite(Number(val)) ? `${Number(val).toFixed(2)}%` : '--');
+const formatFloat = (val) => (Number.isFinite(Number(val)) ? Number(val).toFixed(2) : '--');
+const summaryTone = (val, invert = false) => {
+  const num = Number(val);
+  if (!Number.isFinite(num) || num === 0) return '';
+  if (invert) return num > 0 ? 'negative' : 'positive';
+  return num > 0 ? 'positive' : 'negative';
+};
+const displayMonthlyValue = (val) => {
+  const num = Number(val);
+  if (!Number.isFinite(num)) return '--';
+  return `${num.toFixed(2)}%`;
+};
+const getMonthlyValue = (year, month) => {
+  const matrix = reportData.value?.monthly_matrix || {};
+  if (!matrix[year]) return undefined;
+  return matrix[year][month];
+};
+const buildDrawdownFromPairs = (pairs) => {
+  if (!Array.isArray(pairs) || !pairs.length) return [];
+  const subset = pairs.slice(-600);
+  let runningMax = -Infinity;
+  return subset
+    .map(([date, raw]) => {
+      const value = Number(raw);
+      if (!Number.isFinite(value)) return null;
+      runningMax = Math.max(runningMax, value);
+      if (!Number.isFinite(runningMax) || runningMax <= 0) {
+        return { date, value: 0 };
+      }
+      const drawdown = (value / runningMax - 1) * 100;
+      return { date, value: Number(drawdown.toFixed(2)) };
+    })
+    .filter(Boolean);
+};
 const planHeaderMap = {
   index: '序号',
   step: '步骤',
@@ -459,6 +611,62 @@ const planHeaderMap = {
   remaining_cash: '剩余现金',
   avg_cost: '平均成本',
 };
+
+const reportSummaryList = computed(() => {
+  const summary = reportData.value?.summary;
+  if (!summary) return [];
+  return [
+    { key: 'total', label: '总收益', value: displayPercent(summary.total_return_pct), tone: summaryTone(summary.total_return_pct) },
+    { key: 'annual', label: '年化收益', value: displayPercent(summary.annualized_return_pct), tone: summaryTone(summary.annualized_return_pct) },
+    { key: 'sharpe', label: 'Sharpe', value: formatFloat(summary.sharpe), tone: summaryTone(summary.sharpe) },
+    { key: 'sortino', label: 'Sortino', value: formatFloat(summary.sortino), tone: summaryTone(summary.sortino) },
+    { key: 'maxdd', label: '最大回撤', value: displayPercent(summary.max_drawdown_pct), tone: summaryTone(summary.max_drawdown_pct, true) },
+    { key: 'winrate', label: '胜率', value: displayPercent(summary.win_rate_pct), tone: summaryTone(summary.win_rate_pct) },
+    {
+      key: 'pf',
+      label: '盈亏比',
+      value: formatFloat(summary.profit_factor),
+      tone: Number(summary.profit_factor) >= 1 ? 'positive' : Number(summary.profit_factor) > 0 ? 'negative' : '',
+    },
+    { key: 'avgwin', label: '平均盈利', value: displayPercent(summary.avg_win_pct), tone: summaryTone(summary.avg_win_pct) },
+    { key: 'avgloss', label: '平均亏损', value: displayPercent(summary.avg_loss_pct), tone: summaryTone(summary.avg_loss_pct) },
+  ];
+});
+
+const reportAnnualRows = computed(() => reportData.value?.annual_returns || []);
+const reportAnnualLookup = computed(() => {
+  const rows = reportData.value?.annual_returns || [];
+  const map = {};
+  rows.forEach((item) => {
+    if (item?.year != null) map[item.year] = item.return_pct;
+  });
+  return map;
+});
+const reportMonthlyYears = computed(() => {
+  const matrix = reportData.value?.monthly_matrix || {};
+  return Object.keys(matrix).sort();
+});
+const reportMonthlyOrder = computed(
+  () => reportData.value?.monthly_order || ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']
+);
+const reportDrawdownSeries = computed(() => {
+  const backendSeries = reportData.value?.drawdown_series;
+  if (Array.isArray(backendSeries) && backendSeries.length) {
+    return backendSeries;
+  }
+  const equityPairs = currentEntry.value?.result?.equity_curve;
+  if (!Array.isArray(equityPairs) || !equityPairs.length) return [];
+  return buildDrawdownFromPairs(equityPairs);
+});
+
+watch(
+  () => reportDrawdownSeries.value,
+  (series) => {
+    if (activeTab.value === 'report' && Array.isArray(series)) {
+      nextTick(() => renderReportDrawdown());
+    }
+  }
+);
 </script>
 
 <template>
@@ -738,6 +946,103 @@ const planHeaderMap = {
         </div>
       </section>
 
+      <section v-else-if="activeTab === 'report'" class="report-view">
+        <div v-if="reportLoading" class="loading small">专业报告生成中…</div>
+        <div v-else-if="reportError" class="empty">{{ reportError }}</div>
+        <div v-else-if="!reportData" class="empty">点击标签以生成报告</div>
+        <div v-else class="report-body">
+          <header class="report-header">
+            <div>
+              <h3>{{ reportData.strategy?.title || reportData.strategy?.name || '专业回测报告' }}</h3>
+              <p>自动汇总关键绩效指标、年度收益及回撤轨迹，帮助快速评估策略质量。</p>
+            </div>
+            <button class="ghost-btn" @click="fetchReport">重新生成</button>
+          </header>
+          <div class="report-summary-grid">
+            <div
+              v-for="item in reportSummaryList"
+              :key="item.key"
+              class="report-kpi"
+              :class="item.tone"
+            >
+              <span class="label">{{ item.label }}</span>
+              <strong class="value">{{ item.value }}</strong>
+            </div>
+          </div>
+          <div class="report-panels">
+            <div class="report-panel">
+              <div class="panel-header">
+                <h4>年度收益</h4>
+                <span>按自然年统计</span>
+              </div>
+              <div v-if="!reportAnnualRows.length" class="empty small">年度收益数据不足</div>
+              <div v-else class="table-wrapper compact-table">
+                <table class="modern-table report-table">
+                  <thead>
+                    <tr><th>年份</th><th>收益率</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in reportAnnualRows" :key="row.year">
+                      <td>{{ row.year }}</td>
+                      <td :class="row.return_pct >= 0 ? 'positive' : 'negative'">{{ displayMonthlyValue(row.return_pct) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="report-panel">
+              <div class="panel-header">
+                <h4>回撤轨迹</h4>
+                <span>最近 600 个点</span>
+              </div>
+              <div
+                v-if="!reportDrawdownSeries.length"
+                class="empty small"
+              >
+                暂无回撤数据
+              </div>
+              <div v-else ref="reportChartRef" class="report-chart"></div>
+            </div>
+          </div>
+          <div class="report-panel full-width">
+            <div class="panel-header">
+              <h4>月度收益矩阵</h4>
+              <span>绿色代表盈利，红色代表亏损</span>
+            </div>
+            <div v-if="!reportMonthlyYears.length" class="empty small">月度收益数据不足</div>
+            <div v-else class="monthly-matrix">
+              <table>
+                <thead>
+                  <tr>
+                    <th>年份/月</th>
+                    <th v-for="month in reportMonthlyOrder" :key="month">{{ month }}</th>
+                    <th>全年</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="year in reportMonthlyYears" :key="year">
+                    <td class="year-label">{{ year }}</td>
+                    <td
+                      v-for="month in reportMonthlyOrder"
+                      :key="year + month"
+                      :class="[
+                        'month-cell',
+                        getMonthlyValue(year, month) > 0 ? 'positive' : getMonthlyValue(year, month) < 0 ? 'negative' : '',
+                      ]"
+                    >
+                      {{ getMonthlyValue(year, month) != null ? displayMonthlyValue(getMonthlyValue(year, month)) : '--' }}
+                    </td>
+                    <td class="year-total" :class="reportAnnualLookup[year] >= 0 ? 'positive' : 'negative'">
+                      {{ reportAnnualLookup[year] != null ? displayMonthlyValue(reportAnnualLookup[year]) : '--' }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section v-else-if="activeTab === 'brief'" class="brief-view">
         <div class="brief-card" v-if="dailyBrief">
           <div class="brief-line" v-for="(line, idx) in dailyBrief.split('\n')" :key="idx">
@@ -889,5 +1194,158 @@ const planHeaderMap = {
 .empty.small {
   font-size: 12px;
   padding: 8px 0;
+}
+
+.report-view {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.report-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: rgba(15, 23, 42, 0.85);
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  padding: 18px;
+  box-shadow: 0 20px 45px rgba(2, 6, 23, 0.35);
+}
+.report-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.report-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+.report-header p {
+  margin: 4px 0 0;
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+.ghost-btn {
+  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  color: #e2e8f0;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.ghost-btn:hover {
+  border-color: #38bdf8;
+  color: #38bdf8;
+}
+.report-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+.report-kpi {
+  background: #0f172a;
+  border-radius: 14px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: transform 0.2s ease;
+}
+.report-kpi .label {
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+.report-kpi .value {
+  font-size: 1.15rem;
+}
+.report-kpi.positive .value {
+  color: #34d399;
+}
+.report-kpi.negative .value {
+  color: #f87171;
+}
+.report-panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+.report-panel {
+  background: #0c1220;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.report-panel.full-width {
+  width: 100%;
+  box-sizing: border-box;
+}
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.panel-header h4 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+.panel-header span {
+  color: #94a3b8;
+  font-size: 0.75rem;
+}
+.report-chart {
+  width: 100%;
+  height: 220px;
+}
+.report-table td,
+.report-table th {
+  text-align: left;
+}
+.monthly-matrix {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  display: block;
+  padding-bottom: 8px;
+}
+.monthly-matrix table {
+  width: 100%;
+  min-width: 900px;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  table-layout: fixed;
+}
+.monthly-matrix th,
+.monthly-matrix td {
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  text-align: center;
+}
+.monthly-matrix thead {
+  background: rgba(148, 163, 184, 0.08);
+}
+.month-cell {
+  font-variant-numeric: tabular-nums;
+}
+.month-cell.positive {
+  color: #34d399;
+}
+.month-cell.negative {
+  color: #f87171;
+}
+.year-label {
+  text-align: left;
+  color: #e2e8f0;
+  font-weight: 600;
+}
+.year-total {
+  font-weight: 600;
 }
 </style>
