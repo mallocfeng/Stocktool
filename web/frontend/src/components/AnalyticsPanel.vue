@@ -117,6 +117,10 @@ const selectResult = (entry) => {
 };
 
 const currentEntry = computed(() => props.results.find((entry) => entry.name === selectedResult.value) || null);
+const baseStaticEntry = computed(() => {
+  const nonDynamic = props.results.find((entry) => entry.name !== 'dynamic_capital');
+  return nonDynamic || props.results[0] || null;
+});
 const investmentSeriesMain = computed(
   () => currentEntry.value?.result?.investmentCurveMain || currentEntry.value?.result?.investmentAmount || []
 );
@@ -126,7 +130,7 @@ const investmentSeriesHedge = computed(
 const dynamicDetails = computed(() => currentEntry.value?.result?.positionDetail || []);
 const dynamicTrades = computed(() => currentEntry.value?.result?.trades || []);
 const dynamicSummary = computed(() => currentEntry.value?.result?.dynamicSummary || null);
-const equityCurveStatic = computed(() => currentEntry.value?.result?.equity_curve || []);
+const equityCurveStatic = computed(() => baseStaticEntry.value?.result?.equity_curve || []);
 const equityCurveDynamic = computed(() => currentEntry.value?.result?.equityCurveWithDynamicFund || []);
 const dynamicForceStop = computed(
   () => currentEntry.value?.result?.forceStopByDrawdown ?? currentEntry.value?.result?.forceStop ?? false
@@ -606,6 +610,11 @@ const formatDrawdown = (val) => {
 const formatBoolean = (val) => (val ? '是' : '否');
 const displayPercent = (val) => (Number.isFinite(Number(val)) ? `${Number(val).toFixed(2)}%` : '--');
 const formatFloat = (val) => (Number.isFinite(Number(val)) ? Number(val).toFixed(2) : '--');
+const formatHands = (val) => {
+  const num = Number(val);
+  if (!Number.isFinite(num)) return '--';
+  return `${Math.round(num)} 手`;
+};
 const summaryTone = (val, invert = false) => {
   const num = Number(val);
   if (!Number.isFinite(num) || num === 0) return '';
@@ -848,7 +857,7 @@ watch(
               <h4>主方向配置</h4>
               <ul>
                 <li><span>初始投资</span><strong>{{ formatAmount(dynamicSummary.initialInvestment) }}</strong></li>
-                <li><span>亏损加注</span><strong>{{ formatAmount(dynamicSummary.lossStepAmount) }}</strong></li>
+                <li><span>亏损加注</span><strong>{{ formatHands(dynamicSummary.lossStepAmount) }}</strong></li>
                 <li><span>最大加注次数</span><strong>{{ dynamicSummary.maxAddSteps }}</strong></li>
                 <li><span>投资上限</span><strong>{{ formatAmount(dynamicSummary.maxInvestmentLimit) }}</strong></li>
                 <li><span>盈利后重置</span><strong>{{ formatBoolean(dynamicSummary.resetOnWin) }}</strong></li>
@@ -861,7 +870,7 @@ watch(
               <ul>
                 <li><span>启用对冲</span><strong>{{ formatBoolean(dynamicSummary.enableHedge) }}</strong></li>
                 <li><span>对冲初始</span><strong>{{ formatAmount(dynamicSummary.hedgeInitialInvestment) }}</strong></li>
-                <li><span>对冲加注</span><strong>{{ formatAmount(dynamicSummary.hedgeLossStepAmount) }}</strong></li>
+                <li><span>对冲加注</span><strong>{{ formatHands(dynamicSummary.hedgeLossStepAmount) }}</strong></li>
                 <li><span>最大对冲加注数</span><strong>{{ dynamicSummary.hedgeMaxAddSteps }}</strong></li>
                 <li><span>实际最大对冲连亏</span><strong>{{ dynamicSummary.hedgeMaxLossStreakUsed ?? '-' }}</strong></li>
                 <li><span>实际最大对冲投资</span><strong>{{ formatAmount(dynamicSummary.hedgeMaxInvestmentUsed) }}</strong></li>
@@ -886,11 +895,11 @@ watch(
                     <th>平仓时间</th>
                     <th>投资金额</th>
                     <th>连续亏损</th>
-                    <th>数量</th>
+                    <th>数量（手）</th>
                     <th>动态盈亏</th>
                     <th>对冲投资</th>
                     <th>对冲连亏</th>
-                    <th>对冲数量</th>
+                    <th>对冲数量（手）</th>
                     <th>对冲盈亏</th>
                   </tr>
                 </thead>
@@ -900,13 +909,13 @@ watch(
                     <td>{{ trade.exit_date }}</td>
                     <td>{{ formatAmount(trade.investment_amount ?? '-') }}</td>
                     <td>{{ trade.loss_streak ?? '-' }}</td>
-                    <td>{{ trade.adjusted_quantity ?? '-' }}</td>
+                    <td>{{ trade.adjusted_quantity != null ? Math.round(trade.adjusted_quantity / 100) : '-' }}</td>
                     <td :class="(trade.pnl_with_dynamic_fund ?? 0) >= 0 ? 'positive' : 'negative'">
                       {{ formatAmount(trade.pnl_with_dynamic_fund ?? '-') }}
                     </td>
                     <td>{{ formatAmount(trade.hedge_investment_amount ?? '-') }}</td>
                     <td>{{ trade.hedge_loss_streak ?? '-' }}</td>
-                    <td>{{ trade.hedge_adjusted_quantity ?? '-' }}</td>
+                    <td>{{ trade.hedge_adjusted_quantity != null ? Math.round(trade.hedge_adjusted_quantity / 100) : '-' }}</td>
                     <td :class="(trade.hedge_pnl_with_dynamic_fund ?? 0) >= 0 ? 'positive' : 'negative'">
                       {{ trade.hedge_pnl_with_dynamic_fund != null ? formatAmount(trade.hedge_pnl_with_dynamic_fund) : '-' }}
                     </td>
@@ -924,18 +933,22 @@ watch(
                   <tr>
                     <th>日期</th>
                     <th>投资金额</th>
+                    <th>数量（手）</th>
                     <th>连亏次数</th>
                     <th>对冲金额</th>
+                    <th>对冲数量（手）</th>
                     <th>对冲连亏</th>
                     <th>止损触发</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="row in dynamicDetails.slice(-120).reverse()" :key="row.date + (row.investmentAmount ?? 0)">
+                  <tr v-for="row in dynamicDetails.slice(-120)" :key="row.date + (row.investmentAmount ?? 0)">
                     <td>{{ row.date }}</td>
                     <td>{{ formatAmount(row.investmentAmount) }}</td>
+                    <td>{{ row.quantity != null ? Math.round(row.quantity / 100) : '-' }}</td>
                     <td>{{ row.lossStreak }}</td>
                     <td>{{ formatAmount(row.hedgeInvestmentAmount) }}</td>
+                    <td>{{ row.hedgeQuantity != null ? Math.round(row.hedgeQuantity / 100) : '-' }}</td>
                     <td>{{ row.hedgeLossStreak }}</td>
                     <td>{{ formatBoolean(row.forceStop) }}</td>
                   </tr>

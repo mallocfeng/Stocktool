@@ -41,16 +41,16 @@ const config = reactive({
     dca: { enabled: false, size: 5, target: 20 },
     grid: { enabled: false, pct: 5, cash: 1000, limit: '', accumulate: true },
     dynamic: {
-      enabled: false,
-      lossStepAmount: 2000,
-      maxAddSteps: 3,
+      enabled: true,
+      lossStepAmount: 10,
+      maxAddSteps: 5,
       maxInvestmentLimit: 50000,
       resetOnWin: true,
       maxDrawdownLimit: '',
-      enableHedge: false,
+      enableHedge: true,
       hedgeInitialInvestment: 5000,
-      hedgeLossStepAmount: 1000,
-      hedgeMaxAddSteps: 2,
+      hedgeLossStepAmount: 5,
+      hedgeMaxAddSteps: 5,
     },
   },
 });
@@ -492,8 +492,9 @@ const runBacktest = () => {
         </label>
         <div class="sub-grid" v-if="config.strategies.dynamic.enabled">
           <label class="field">
-            <span>亏损加注金额</span>
+            <span>亏损加注（手）</span>
             <input type="number" v-model="config.strategies.dynamic.lossStepAmount" min="0" />
+            <small class="field-hint">单位为手，1 手 = 100 股</small>
           </label>
           <label class="field">
             <span>连续加注次数</span>
@@ -526,8 +527,9 @@ const runBacktest = () => {
                 <input type="number" v-model="config.strategies.dynamic.hedgeInitialInvestment" min="0" />
               </label>
               <label class="field">
-                <span>对冲亏损加注</span>
+                <span>对冲亏损加注（手）</span>
                 <input type="number" v-model="config.strategies.dynamic.hedgeLossStepAmount" min="0" />
+                <small class="field-hint">单位为手，1 手 = 100 股</small>
               </label>
               <label class="field">
                 <span>对冲加注上限</span>

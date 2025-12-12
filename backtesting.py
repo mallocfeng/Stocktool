@@ -311,8 +311,10 @@ def backtest_dynamic_capital(
                 return default
         return float(value)
 
+    LOT_SIZE = 100
+
     initial_investment = max(0.0, _to_float(config.get("initialInvestment"), initial_capital))
-    loss_step_amount = max(0.0, _to_float(config.get("lossStepAmount"), 0.0))
+    loss_step_lots = max(0.0, _to_float(config.get("lossStepAmount"), 0.0))
     max_add_steps_raw = config.get("maxAddSteps", 3)
     max_add_steps = int(max_add_steps_raw) if isinstance(max_add_steps_raw, (int, float)) else 0
     max_limit = _to_float(config.get("maxInvestmentLimit"), initial_capital)
@@ -320,7 +322,7 @@ def backtest_dynamic_capital(
     drawdown_limit_raw = _to_float(config.get("maxDrawdownLimit"), 0.0)
     hedge_enabled = bool(config.get("enableHedge"))
     hedge_initial = max(0.0, _to_float(config.get("hedgeInitialInvestment"), 0.0))
-    hedge_loss_step = max(0.0, _to_float(config.get("hedgeLossStepAmount"), 0.0))
+    hedge_loss_step_lots = max(0.0, _to_float(config.get("hedgeLossStepAmount"), 0.0))
     hedge_max_steps_raw = config.get("hedgeMaxAddSteps", 2)
     hedge_max_steps = int(hedge_max_steps_raw) if isinstance(hedge_max_steps_raw, (int, float)) else 0
 
@@ -356,6 +358,8 @@ def backtest_dynamic_capital(
     next_amount_hedge = min(max_limit, hedge_initial) if hedge_initial > 0 else min(max_limit, initial_investment)
     last_allocation_main = next_amount_main
     last_allocation_hedge = next_amount_hedge
+    pending_loss_steps_main = 0
+    pending_loss_steps_hedge = 0
 
     trades: List[Trade] = []
     investment_series: List[List[Any]] = []
@@ -379,24 +383,41 @@ def backtest_dynamic_capital(
             return 0
         return min(streak, max_steps)
 
+    def floor_lot(shares: int) -> int:
+        if shares <= 0:
+            return 0
+        return (shares // LOT_SIZE) * LOT_SIZE
+
     for i, date in enumerate(idx):
         price = float(close.iloc[i])
 
         if position == 0 and buy.iloc[i]:
-            target_amount = clamp_amount(next_amount_main if not force_stop else initial_investment)
-            if target_amount <= 0 or cash_main <= 0:
+            base_budget = clamp_amount(next_amount_main if not force_stop else initial_investment)
+            base_shares = floor_lot(int(base_budget // price))
+            extra_shares = 0
+            if not force_stop and pending_loss_steps_main > 0 and loss_step_lots > 0:
+                extra_shares = int(loss_step_lots * LOT_SIZE * pending_loss_steps_main)
+            if max_limit > 0:
+                max_shares_limit = floor_lot(int(max_limit // price))
+            else:
+                max_shares_limit = None
+            desired_shares = base_shares + extra_shares
+            if max_shares_limit is not None:
+                desired_shares = min(desired_shares, max_shares_limit)
+            if desired_shares <= 0 or cash_main <= 0:
                 pass
             else:
                 loss_state = loss_streak
-                affordable_shares = int((cash_main / price) if fee_rate == 0 else cash_main / (price * (1 + fee_rate)))
-                desired_shares = int(target_amount // price)
-                shares = min(affordable_shares, desired_shares)
+                affordable_shares = floor_lot(
+                    int((cash_main / price) if fee_rate == 0 else cash_main / (price * (1 + fee_rate)))
+                )
+                shares = floor_lot(min(affordable_shares, desired_shares))
                 if shares > 0:
                     cost = shares * price
                     fee = cost * fee_rate
                     total_cost = cost + fee
                     if total_cost > cash_main:
-                        shares = int(cash_main / (price * (1 + fee_rate)))
+                        shares = floor_lot(int(cash_main / (price * (1 + fee_rate))))
                         if shares <= 0:
                             shares = 0
                     if shares > 0:
@@ -423,8 +444,18 @@ def backtest_dynamic_capital(
                         hedge_entry_amount = 0.0
                         hedge_entry_loss_state = int(hedge_loss_state)
                         if hedge_enabled and next_amount_hedge > 0:
-                            hedge_target = clamp_amount(next_amount_hedge if not force_stop else hedge_initial)
-                            hedge_shares = int(hedge_target // price)
+                            hedge_base = clamp_amount(next_amount_hedge if not force_stop else hedge_initial)
+                            hedge_base_shares = floor_lot(int(hedge_base // price))
+                            hedge_extra_shares = 0
+                            if not force_stop and pending_loss_steps_hedge > 0 and hedge_loss_step_lots > 0:
+                                hedge_extra_shares = int(hedge_loss_step_lots * LOT_SIZE * pending_loss_steps_hedge)
+                            if max_limit > 0:
+                                hedge_max_shares_limit = floor_lot(int(max_limit // price))
+                            else:
+                                hedge_max_shares_limit = None
+                            hedge_shares = hedge_base_shares + hedge_extra_shares
+                            if hedge_max_shares_limit is not None:
+                                hedge_shares = min(hedge_shares, hedge_max_shares_limit)
                             if hedge_shares > 0:
                                 proceeds = hedge_shares * price
                                 hedge_entry_fee = proceeds * fee_rate
@@ -439,6 +470,8 @@ def backtest_dynamic_capital(
                                 hedge_entry_loss_state = int(hedge_loss_state)
                                 hedge_max_investment_used = max(hedge_max_investment_used, hedge_amount_used)
                                 hedge_max_loss_streak_used = max(hedge_max_loss_streak_used, hedge_loss_state)
+                                pending_loss_steps_hedge = 0
+                        pending_loss_steps_main = 0
                         position_details.append(
                             {
                                 "date": ts,
@@ -475,15 +508,18 @@ def backtest_dynamic_capital(
                 hedge_position = 0
                 if hedge_pnl >= 0:
                     hedge_loss_streak = 0
+                    pending_loss_steps_hedge = 0
                     next_amount_hedge = clamp_amount(hedge_initial if reset_on_win else last_allocation_hedge)
                 else:
                     hedge_loss_streak += 1
                     hedge_max_loss_streak_used = max(hedge_max_loss_streak_used, hedge_loss_streak)
                     hedge_steps = allowed_steps(hedge_loss_streak, hedge_max_steps)
                     if force_stop:
-                        next_amount_hedge = hedge_initial
+                        pending_loss_steps_hedge = 0
+                        next_amount_hedge = clamp_amount(hedge_initial)
                     else:
-                        next_amount_hedge = clamp_amount(hedge_initial + hedge_loss_step * hedge_steps)
+                        pending_loss_steps_hedge = hedge_steps
+                        next_amount_hedge = clamp_amount(hedge_initial)
                 hedge_entry_shares = 0
                 hedge_entry_amount = 0.0
                 hedge_entry_loss_state = 0
@@ -515,15 +551,18 @@ def backtest_dynamic_capital(
 
             if pnl >= 0:
                 loss_streak = 0
+                pending_loss_steps_main = 0
                 next_amount_main = clamp_amount(initial_investment if reset_on_win else last_allocation_main)
             else:
                 loss_streak += 1
                 max_loss_streak_used = max(max_loss_streak_used, loss_streak)
                 steps = allowed_steps(loss_streak, max_add_steps)
                 if force_stop:
-                    next_amount_main = initial_investment
+                    pending_loss_steps_main = 0
+                    next_amount_main = clamp_amount(initial_investment)
                 else:
-                    next_amount_main = clamp_amount(initial_investment + loss_step_amount * steps)
+                    pending_loss_steps_main = steps
+                    next_amount_main = clamp_amount(initial_investment)
 
         equity_value = cash_main + position * price + hedge_cash - hedge_position * price
         equity.iloc[i] = equity_value
@@ -620,7 +659,7 @@ def backtest_dynamic_capital(
     )
     result.dynamic_summary = {
         "initialInvestment": float(initial_investment),
-        "lossStepAmount": float(loss_step_amount),
+        "lossStepAmount": float(loss_step_lots),
         "maxAddSteps": max_add_steps,
         "maxInvestmentLimit": float(max_limit),
         "resetOnWin": reset_on_win,
@@ -628,7 +667,7 @@ def backtest_dynamic_capital(
         "maxInvestmentUsed": float(max_investment_used),
         "enableHedge": hedge_enabled,
         "hedgeInitialInvestment": float(hedge_initial),
-        "hedgeLossStepAmount": float(hedge_loss_step),
+        "hedgeLossStepAmount": float(hedge_loss_step_lots),
         "hedgeMaxAddSteps": hedge_max_steps,
         "hedgeMaxLossStreakUsed": int(hedge_max_loss_streak_used) if hedge_enabled else None,
         "hedgeMaxInvestmentUsed": float(hedge_max_investment_used) if hedge_enabled else None,
