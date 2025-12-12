@@ -625,9 +625,211 @@ label {
   }
 }
 
+.config-panel {
+  position: relative;
+  overflow: visible;
+  z-index: 300;
+}
+
 .config-panel .panel-title {
   margin: 0 0 12px;
   font-size: 1.2rem;
+}
+
+.strategy-launch {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: linear-gradient(180deg, rgba(var(--surface-rgb), 0.85), rgba(var(--surface-rgb), 0.95));
+  border-radius: 16px;
+  padding: 16px 18px 14px;
+}
+
+.strategy-launch-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.strategy-launch-info {
+  flex: 1;
+}
+
+.strategy-summary {
+  margin: 6px 0 4px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.strategy-summary .summary-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 48px;
+}
+
+.summary-content {
+  flex: 1;
+  line-height: 1.4;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.summary-pill {
+  background: rgba(var(--tone-1-rgb, 59, 130, 246), 0.15);
+  border: 1px solid rgba(var(--tone-1-rgb, 59, 130, 246), 0.3);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  padding: 2px 10px;
+  border-radius: 10px;
+}
+.strategy-hints {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.strategy-hints li {
+  margin-bottom: 2px;
+}
+
+.strategy-toggle {
+  white-space: nowrap;
+  align-self: flex-start;
+}
+
+.strategy-drawer-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 200;
+}
+
+.drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.strategy-drawer-panel {
+  position: absolute;
+  top: 12px;
+  left: calc(100% - 12px);
+  width: 420px;
+  max-width: 90vw;
+  max-height: calc(100% - 24px);
+  margin: 0;
+  background: linear-gradient(165deg, rgba(var(--surface-rgb), 0.9), rgba(var(--surface-rgb), 0.65));
+  border: 1px solid rgba(51, 65, 85, 0.5);
+  border-radius: 24px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+  filter: drop-shadow(0 22px 60px rgba(var(--overlay-rgb), 0.35));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  pointer-events: auto;
+  z-index: 210;
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.drawer-header h3 {
+  margin: 0;
+}
+
+.drawer-header p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.plain-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.close-btn {
+  border: 1px solid var(--border);
+  background: rgba(var(--surface-rgb), 0.75);
+  backdrop-filter: blur(4px);
+  position: relative;
+  padding: 0;
+}
+
+.close-btn span,
+.close-btn span::after {
+  position: absolute;
+  content: '';
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 2px;
+  background: var(--text-primary);
+  border-radius: 999px;
+  transition: background 0.2s;
+}
+
+.close-btn span {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.close-btn span::after {
+  transform: translate(-50%, -50%) rotate(90deg);
+}
+
+.close-btn:hover {
+  border-color: var(--accent);
+  background: rgba(var(--surface-rgb), 0.9);
+}
+
+.drawer-body {
+  padding: 18px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.drawer-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  background: rgba(var(--surface-rgb), 0.4);
+}
+
+.drawer-slide-enter-active,
+.drawer-slide-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.drawer-slide-enter-from,
+.drawer-slide-leave-to {
+  opacity: 0;
+}
+
+.drawer-slide-enter-active .strategy-drawer-panel,
+.drawer-slide-leave-active .strategy-drawer-panel {
+  transition: transform 0.28s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.drawer-slide-enter-from .strategy-drawer-panel,
+.drawer-slide-leave-to .strategy-drawer-panel {
+  transform: translateX(-40px) scaleX(0.96);
 }
 
 .form-section {
