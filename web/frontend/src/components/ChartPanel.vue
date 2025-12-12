@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref, watch, nextTick, onBeforeUnmount } from 'vue';
+import { onMounted, ref, watch, nextTick, onBeforeUnmount, computed } from 'vue';
 import * as echarts from 'echarts';
 import { resolveEchartTheme } from '../lib/echartTheme';
 
@@ -15,6 +15,9 @@ const props = defineProps({
 const chartContainer = ref(null);
 let chartInstance = null;
 let resizeObserver = null;
+
+const hasKlineData = computed(() => Array.isArray(props.marketData?.kline) && props.marketData.kline.length > 0);
+const themeClass = computed(() => `theme-${props.theme || 'dark'}`);
 
 const readCssVar = (name, fallback) => {
   if (typeof window === 'undefined') return fallback;
@@ -231,13 +234,71 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="chart-panel" ref="chartContainer"></div>
+  <div class="chart-panel-wrapper" :class="themeClass">
+    <div v-if="!hasKlineData" class="no-data-overlay">
+      还未加载数据，请先加载 CSV 或在线读取股票数据
+    </div>
+    <div class="chart-panel" ref="chartContainer"></div>
+  </div>
 </template>
 
 <style scoped>
-.chart-panel {
+.chart-panel-wrapper {
+  position: relative;
   width: 100%;
   height: 100%;
   min-height: 360px;
+}
+
+.chart-panel {
+  width: 100%;
+  height: 100%;
+}
+
+.no-data-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+  max-width: min(360px, calc(100% - 32px));
+  padding: 10px 14px;
+  font-size: 15px;
+  line-height: 1.35;
+  text-align: center;
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  pointer-events: none;
+}
+
+.chart-panel-wrapper.theme-dark .no-data-overlay {
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(15, 23, 42, 0.74);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.chart-panel-wrapper.theme-light .no-data-overlay {
+  color: rgba(15, 23, 42, 0.9);
+  background:
+    linear-gradient(135deg, rgba(var(--tone-1-rgb), 0.16), rgba(var(--tone-4-rgb), 0.08)),
+    rgba(var(--surface-rgb), 0.9);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
+}
+
+.chart-panel-wrapper.theme-morandi .no-data-overlay {
+  color: var(--text-primary);
+  background:
+    linear-gradient(
+      135deg,
+      rgba(var(--tone-1-rgb), 0.22),
+      rgba(var(--tone-3-rgb), 0.16),
+      rgba(var(--tone-6-rgb), 0.14)
+    ),
+    rgba(var(--surface-rgb), 0.86);
+  border: 1px solid rgba(var(--overlay-rgb), 0.14);
+  box-shadow: 0 12px 30px rgba(var(--overlay-rgb), 0.16);
 }
 </style>
