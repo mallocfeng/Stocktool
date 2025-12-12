@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import pandas as pd
 
@@ -24,6 +24,8 @@ class BacktestParams:
     initial_capital: float
     fee_rate: float
     strategies: Dict
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
 
 
 @dataclass
@@ -71,13 +73,32 @@ def _run_backtests(params: BacktestParams, stop_event, emit) -> None:
     if not required_cols.issubset(df.columns):
         raise ValueError(f"CSV 至少需要列：{', '.join(required_cols)}")
 
+    df["date"] = pd.to_datetime(df["date"])
+
+    start_ts = pd.to_datetime(params.start_date) if params.start_date else None
+    end_ts = pd.to_datetime(params.end_date) if params.end_date else None
+    if start_ts and end_ts and start_ts > end_ts:
+        raise ValueError("开始时间不能晚于结束时间")
+    if start_ts or end_ts:
+        mask = pd.Series(True, index=df.index)
+        if start_ts is not None:
+            mask &= df["date"] >= start_ts
+        if end_ts is not None:
+            mask &= df["date"] <= end_ts
+        df = df.loc[mask].copy()
+        if df.empty:
+            raise ValueError("筛选后的日期范围没有可用数据，请调整时间。")
+        emit(
+            "log",
+            f"筛选后的数据区间：{df['date'].iloc[0]} 至 {df['date'].iloc[-1]}（共 {len(df)} 行）",
+        )
+
     df_datetime = df.copy()
-    df_datetime["date"] = pd.to_datetime(df_datetime["date"])
     df_datetime.set_index("date", inplace=True)
     emit("log", f"数据行数：{len(df)}")
     emit("log", "正在解析公式并生成信号……")
 
-    engine = TdxFormulaEngine(df)
+    engine = TdxFormulaEngine(df.copy())
     buy, sell = engine.run(params.formula)
     check_cancel()
 

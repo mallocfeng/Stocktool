@@ -44,11 +44,43 @@ let scoreChartInstance = null;
 let dynamicEquityChartInstance = null;
 let dynamicInvestmentChartInstance = null;
 
-const parseFreqs = () =>
-  (props.multiFreqs || 'D,W,M')
-    .split(',')
-    .map((f) => f.trim().toUpperCase())
-    .filter((f) => f.length);
+const normalizeFreqToken = (value) => {
+  if (!value) return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  const compact = trimmed.replace(/\s+/g, '');
+  if (!compact) return '';
+  return /^\d/.test(compact) ? compact.toLowerCase() : compact.toUpperCase();
+};
+
+const buildMultiRequestPayload = () => {
+  const raw = props.multiFreqs || 'D,W,M';
+  const tokens = raw.split(',').map((item) => item.trim()).filter(Boolean);
+  const freqSet = new Set();
+  const freqLabels = {};
+  const pairs = [];
+  tokens.forEach((token) => {
+    const cleaned = token.replace(/\s+/g, '');
+    if (!cleaned) return;
+    const [expr, label] = cleaned.split('@');
+    const parts = expr.split(/(?:->|→|＞|>)/i).map((part) => normalizeFreqToken(part));
+    if (parts.length === 2 && parts[0] && parts[1]) {
+      freqSet.add(parts[0]);
+      freqSet.add(parts[1]);
+      const pairItem = { trend: parts[0], entry: parts[1] };
+      if (label) pairItem.label = label.trim();
+      pairs.push(pairItem);
+    } else {
+      const freq = normalizeFreqToken(expr);
+      if (freq) {
+        freqSet.add(freq);
+        if (label) freqLabels[freq] = label.trim();
+      }
+    }
+  });
+  if (!freqSet.size) ['D', 'W', 'M'].forEach((f) => freqSet.add(f));
+  return { freqs: Array.from(freqSet), pairs, labels: freqLabels };
+};
 
 const selectResult = (entry) => {
   selectedResult.value = entry.name;
@@ -260,16 +292,45 @@ const fetchMulti = async () => {
   loading.value = true;
   multiMessage.value = '';
   try {
-    const res = await axios.post('/analytics/multi_timeframe', { freqs: parseFreqs() });
-    if (Array.isArray(res.data) && res.data.length) {
-      multiSignals.value = res.data;
-      multiMessage.value = '';
-    } else {
-      multiSignals.value = [];
-      multiMessage.value = '暂无信号数据';
+    const payload = buildMultiRequestPayload();
+    const res = await axios.post('/analytics/multi_timeframe', payload);
+    const series = Array.isArray(res.data?.series) ? res.data.series : [];
+    const pairSeries = Array.isArray(res.data?.pairs) ? res.data.pairs : [];
+    const combined = [...series, ...pairSeries];
+    multiSignals.value = combined;
+    const meta = res.data?.meta || {};
+    const notes = [];
+    if (meta.base_interval) {
+      notes.push(`当前数据最小周期约 ${meta.base_interval}`);
     }
+    if (Array.isArray(meta.skipped_freqs) && meta.skipped_freqs.length) {
+      notes.push(
+        `以下周期因数据限制被忽略：${meta.skipped_freqs
+          .map((item) => item.freq)
+          .filter(Boolean)
+          .join('、')}`,
+      );
+    }
+    if (Array.isArray(meta.skipped_pairs) && meta.skipped_pairs.length) {
+      notes.push(
+        `以下组合未生成：${meta.skipped_pairs
+          .map((item) => item.pair)
+          .filter(Boolean)
+          .join('、')}`,
+      );
+    }
+    if (!combined.length) {
+      if (!notes.length) {
+        notes.push('暂无信号数据');
+      }
+      if (Array.isArray(meta.recommended_freqs) && meta.recommended_freqs.length) {
+        notes.push(`推荐周期：${meta.recommended_freqs.join(' / ')}`);
+      }
+    }
+    multiMessage.value = notes.join('；');
   } catch (e) {
     console.error(e);
+    multiSignals.value = [];
     multiMessage.value = '请求失败';
   } finally {
     loading.value = false;
@@ -314,6 +375,28 @@ watch(
         renderDynamicEquityChart();
         renderDynamicInvestmentChart();
       });
+    }
+  }
+);
+
+watch(
+  () => props.multiFreqs,
+  () => {
+    multiSignals.value = [];
+    multiMessage.value = '';
+    if (activeTab.value === 'multi' && props.hasData) {
+      fetchMulti();
+    }
+  }
+);
+
+watch(
+  () => props.results,
+  () => {
+    multiSignals.value = [];
+    multiMessage.value = '';
+    if (activeTab.value === 'multi' && props.hasData) {
+      fetchMulti();
     }
   }
 );
@@ -642,9 +725,16 @@ const planHeaderMap = {
       </section>
 
       <section v-else-if="activeTab === 'multi'">
+        <p class="multi-hint">
+          示例：<code>D,W,M</code> 表示单周期；<code>15m&gt;5m</code> 表示“15m 判断趋势 &amp; 5m 精确买点”，可用
+          <code>@备注</code> 自定义标题。
+        </p>
         <div v-if="!multiSignals.length" class="empty">{{ multiMessage || '点击标签以加载多周期信号' }}</div>
-        <div v-else class="multi-charts">
-          <SignalChart v-for="item in multiSignals" :key="item.freq" :dataset="item" :height="220" />
+        <div v-else>
+          <div class="multi-charts">
+            <SignalChart v-for="item in multiSignals" :key="item.freq" :dataset="item" :height="220" />
+          </div>
+          <div v-if="multiMessage" class="empty small">{{ multiMessage }}</div>
         </div>
       </section>
 
@@ -782,6 +872,19 @@ const planHeaderMap = {
   margin: 0;
   font-size: 0.95rem;
   color: var(--text-primary);
+}
+.multi-hint {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin: 0 0 8px;
+}
+.multi-hint code {
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  background: rgba(148, 163, 184, 0.18);
+  padding: 0 4px;
+  border-radius: 4px;
 }
 .empty.small {
   font-size: 12px;

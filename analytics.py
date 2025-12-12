@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
+from pandas.tseries.frequencies import to_offset
 
 from formula_engine import TdxFormulaEngine
 from backtesting import BacktestResult
@@ -21,23 +22,201 @@ def _resample_ohlc(df: pd.DataFrame, freq: str) -> pd.DataFrame:
     return df.resample(freq).agg(agg).dropna()
 
 
+def normalize_timeframe_token(freq: str) -> Tuple[str, str]:
+    token = (freq or "").strip()
+    if not token:
+        raise ValueError("empty freq")
+    cleaned = token.lower().strip()
+    cleaned = cleaned.replace("分钟k", "分钟").replace("分k", "分")
+    cleaned = cleaned.rstrip("k").strip()
+    base_aliases = {
+        "d": ("D", "1D"),
+        "day": ("D", "1D"),
+        "daily": ("D", "1D"),
+        "w": ("W", "7D"),
+        "week": ("W", "7D"),
+        "weekly": ("W", "7D"),
+        "m": ("M", "30D"),
+        "mon": ("M", "30D"),
+        "month": ("M", "30D"),
+        "monthly": ("M", "30D"),
+        "h": ("1H", "1H"),
+        "hour": ("1H", "1H"),
+        "hourly": ("1H", "1H"),
+    }
+    if cleaned in base_aliases:
+        return base_aliases[cleaned]
+
+    pattern = re.compile(r"(\d+)\s*([a-z]+|[\u4e00-\u9fff]+)?")
+    match = pattern.fullmatch(cleaned)
+    if not match:
+        raise ValueError(f"无法解析周期：{freq}")
+    num = int(match.group(1))
+    unit = (match.group(2) or "").lower()
+
+    def unit_key(name: str) -> Optional[str]:
+        if not name:
+            return None
+        minute_alias = {"m", "min", "mins", "minute", "minutes", "分", "分钟"}
+        hour_alias = {"h", "hr", "hrs", "hour", "hours", "小时"}
+        day_alias = {"d", "day", "days", "天", "日"}
+        week_alias = {"w", "wk", "week", "weeks", "周"}
+        month_alias = {"mo", "mon", "month", "months", "月"}
+        if name in minute_alias:
+            return "minute"
+        if name in hour_alias:
+            return "hour"
+        if name in day_alias:
+            return "day"
+        if name in week_alias:
+            return "week"
+        if name in month_alias:
+            return "month"
+        return None
+
+    resolved = unit_key(unit)
+    if resolved == "minute":
+        return (f"{num}m", f"{num}T")
+    if resolved == "hour":
+        return (f"{num}H", f"{num}H")
+    if resolved == "day":
+        label = "D" if num == 1 else f"{num}D"
+        return (label, f"{num}D")
+    if resolved == "week":
+        label = "W" if num == 1 else f"{num}W"
+        return (label, f"{num * 7}D")
+    if resolved == "month":
+        label = "M" if num == 1 else f"{num}M"
+        return (label, f"{num * 30}D")
+    raise ValueError(f"无法识别的周期单位：{freq}")
+
+
+def _infer_base_interval_ns(index: pd.DatetimeIndex) -> Optional[int]:
+    if not isinstance(index, pd.DatetimeIndex) or len(index) < 2:
+        return None
+    values = index.sort_values().view("i8")
+    diffs = np.diff(values)
+    diffs = diffs[diffs > 0]
+    if diffs.size == 0:
+        return None
+    return int(np.median(diffs))
+
+
+def _format_duration(ns: Optional[int]) -> Optional[str]:
+    if not ns:
+        return None
+    seconds = ns / 1_000_000_000
+    if seconds < 60:
+        return f"{int(round(seconds))}s"
+    minutes = seconds / 60
+    if minutes < 60:
+        return f"{int(round(minutes))}m"
+    hours = minutes / 60
+    if hours < 24:
+        return f"{int(round(hours))}H"
+    days = hours / 24
+    if days < 7:
+        return f"{int(round(days))}D"
+    weeks = days / 7
+    if weeks < 4:
+        return f"{int(round(weeks))}W"
+    months = days / 30
+    return f"{int(round(months))}M"
+
+
+def _recommended_freqs(base_ns: Optional[int]) -> List[str]:
+    candidates = [
+        ("1m", "1T"),
+        ("3m", "3T"),
+        ("5m", "5T"),
+        ("15m", "15T"),
+        ("30m", "30T"),
+        ("1H", "1H"),
+        ("2H", "2H"),
+        ("4H", "4H"),
+        ("D", "1D"),
+        ("W", "1W"),
+        ("M", "1M"),
+    ]
+    result: List[str] = []
+    for label, alias in candidates:
+        try:
+            offset = to_offset(alias)
+            nanos = getattr(offset, "nanos", None)
+            if nanos is None:
+                # 非固定周期（例如以周几结尾），跳过
+                continue
+        except ValueError:
+            continue
+        if base_ns is None or nanos >= base_ns:
+            result.append(label)
+    return result or ["D", "W", "M"]
+
+
+def _prepare_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    if isinstance(df.index, pd.DatetimeIndex):
+        return df.sort_index()
+    frame = df.copy()
+    if "date" in frame.columns:
+        frame["date"] = pd.to_datetime(frame["date"])
+        frame.set_index("date", inplace=True)
+    else:
+        frame.index = pd.to_datetime(frame.index)
+    return frame.sort_index()
+
+
 def generate_multi_timeframe_signals(
     df: pd.DataFrame, formula: str, freqs: Sequence[str]
-) -> Tuple[Dict[str, Dict[str, pd.Series]], Dict[str, pd.DataFrame]]:
+) -> Tuple[Dict[str, Dict[str, pd.Series]], Dict[str, pd.DataFrame], Dict[str, object]]:
     results: Dict[str, Dict[str, pd.Series]] = {}
     frames: Dict[str, pd.DataFrame] = {}
-    for freq in freqs:
-        if freq.lower() in ("d", "1d", "day", "daily"):
-            freq_key = "D"
-            df_freq = df
+    df_work = _prepare_dataframe(df)
+    base_ns = _infer_base_interval_ns(df_work.index)
+    default_freqs = _recommended_freqs(base_ns)
+    freq_inputs = list(freqs) if freqs else default_freqs
+    seen_labels: set[str] = set()
+    skipped: List[Dict[str, str]] = []
+
+    for freq in freq_inputs:
+        try:
+            label, alias = normalize_timeframe_token(freq)
+        except ValueError as exc:
+            skipped.append({"freq": str(freq), "reason": str(exc)})
+            continue
+        if label in seen_labels:
+            continue
+        seen_labels.add(label)
+        try:
+            offset = to_offset(alias)
+            nanos = getattr(offset, "nanos", None)
+            if nanos is None:
+                raise ValueError("non-fixed frequency")
+        except ValueError:
+            skipped.append({"freq": label, "reason": "无法转换该周期"})
+            continue
+
+        if base_ns is not None and nanos < base_ns:
+            skipped.append({"freq": label, "reason": "数据粒度不足"})
+            continue
+        if nanos == base_ns:
+            df_freq = df_work
         else:
-            df_freq = _resample_ohlc(df, freq)
-            freq_key = freq
-        frames[freq_key] = df_freq
-        engine = TdxFormulaEngine(df_freq.reset_index())
+            df_freq = _resample_ohlc(df_work, alias)
+        if df_freq.empty:
+            skipped.append({"freq": label, "reason": "周期数据为空"})
+            continue
+        frames[label] = df_freq
+        engine = TdxFormulaEngine(df_freq.reset_index().rename(columns={"index": "date"}))
         buy, sell = engine.run(formula)
-        results[freq_key] = {"buy": buy, "sell": sell}
-    return results, frames
+        results[label] = {"buy": buy, "sell": sell}
+
+    meta = {
+        "base_interval": _format_duration(base_ns),
+        "recommended_freqs": default_freqs,
+        "used_freqs": list(frames.keys()),
+        "skipped_freqs": skipped,
+    }
+    return results, frames, meta
 
 
 def _ema(series: pd.Series, span: int) -> pd.Series:

@@ -1,7 +1,12 @@
 <script setup>
-import { reactive, ref } from 'vue';
+import { reactive, ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import axios from 'axios';
+import flatpickr from 'flatpickr';
+import { Mandarin as flatpickrZh } from 'flatpickr/dist/l10n/zh.js';
+import 'flatpickr/dist/themes/dark.css';
 import FormulaBuilder from './FormulaBuilder.vue';
+
+flatpickr.localize(flatpickrZh);
 
 const props = defineProps({
   busy: { type: Boolean, default: false },
@@ -56,6 +61,126 @@ const stockCode = ref('');
 const fetching = ref(false);
 const assetLabel = ref('');
 const builderVisible = ref(false);
+const dateRange = reactive({ start: '', end: '' });
+const selectedPreset = ref('all');
+const startPickerEl = ref(null);
+const endPickerEl = ref(null);
+let startPicker = null;
+let endPicker = null;
+const rangePresetOptions = [
+  { key: 'all', label: '全部' },
+  { key: '1M', label: '近1月' },
+  { key: '3M', label: '近3月' },
+  { key: '6M', label: '近6月' },
+  { key: '1Y', label: '近1年' },
+];
+let presetApplying = false;
+
+const formatLocalIso = (dateObj, defaults) => {
+  const pad = (n) => String(n).padStart(2, '0');
+  const yyyy = dateObj.getFullYear();
+  const mm = pad(dateObj.getMonth() + 1);
+  const dd = pad(dateObj.getDate());
+  let hh = pad(dateObj.getHours());
+  let min = pad(dateObj.getMinutes());
+  if (defaults) {
+    hh = pad(defaults.hours);
+    min = pad(defaults.minutes);
+  }
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+};
+
+const applyRangePreset = (key) => {
+  presetApplying = true;
+  if (key === 'all') {
+    dateRange.start = '';
+    dateRange.end = '';
+  } else {
+    const now = new Date();
+    const endStr = formatLocalIso(now, { hours: 15, minutes: 0 });
+    let start = new Date(now);
+    if (key.endsWith('M')) {
+      start.setMonth(start.getMonth() - parseInt(key, 10));
+    } else if (key.endsWith('Y')) {
+      start.setFullYear(start.getFullYear() - parseInt(key, 10));
+    }
+    dateRange.start = formatLocalIso(start, { hours: 9, minutes: 0 });
+    dateRange.end = endStr;
+  }
+  selectedPreset.value = key;
+  nextTick(() => {
+    presetApplying = false;
+  });
+};
+
+watch(
+  () => [dateRange.start, dateRange.end],
+  () => {
+    if (presetApplying) return;
+    selectedPreset.value = dateRange.start || dateRange.end ? 'custom' : 'all';
+  }
+);
+
+const toLocalIso = (date) => {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(
+    date.getMinutes()
+  )}`;
+};
+
+const syncPickerFromModel = (picker, value) => {
+  if (!picker) return;
+  if (!value) {
+    if (picker.selectedDates.length) picker.clear();
+    return;
+  }
+  const nextDate = new Date(value);
+  if (!picker.selectedDates.length || Math.abs(picker.selectedDates[0].getTime() - nextDate.getTime()) > 60000) {
+    picker.setDate(nextDate, false);
+  }
+};
+
+watch(
+  () => dateRange.start,
+  (val) => syncPickerFromModel(startPicker, val)
+);
+
+watch(
+  () => dateRange.end,
+  (val) => syncPickerFromModel(endPicker, val)
+);
+
+const buildPicker = (elRef, onChange) => {
+  if (!elRef?.value) return null;
+  return flatpickr(elRef.value, {
+    enableTime: true,
+    time_24hr: true,
+    minuteIncrement: 30,
+    dateFormat: 'Y-m-d H:i',
+    allowInput: true,
+    wrap: false,
+    onChange: (selectedDates) => {
+      onChange(selectedDates?.[0] ? toLocalIso(selectedDates[0]) : '');
+    },
+  });
+};
+
+onMounted(() => {
+  startPicker = buildPicker(startPickerEl, (val) => {
+    dateRange.start = val;
+  });
+  endPicker = buildPicker(endPickerEl, (val) => {
+    dateRange.end = val;
+  });
+  syncPickerFromModel(startPicker, dateRange.start);
+  syncPickerFromModel(endPicker, dateRange.end);
+});
+
+onBeforeUnmount(() => {
+  startPicker?.destroy();
+  endPicker?.destroy();
+});
 
 const triggerFileSelect = () => {
   fileInput.value?.click();
@@ -250,6 +375,8 @@ const runBacktest = () => {
     initial_capital: Number(config.initial_capital),
     fee_rate: Number(config.fee_rate),
     strategies,
+    date_start: dateRange.start || null,
+    date_end: dateRange.end || null,
   };
   emit('run', {
     payload,
@@ -288,6 +415,43 @@ const runBacktest = () => {
       </div>
     </section>
 
+    <section class="form-section">
+      <div class="section-title">时间范围</div>
+      <div class="range-card">
+        <div class="range-presets">
+          <button
+            v-for="preset in rangePresetOptions"
+            :key="preset.key"
+            type="button"
+            class="chip-button"
+            :class="{ active: selectedPreset === preset.key }"
+            @click="applyRangePreset(preset.key)"
+          >
+            {{ preset.label }}
+          </button>
+          <button
+            type="button"
+            class="chip-button ghost"
+            :class="{ active: selectedPreset === 'custom' }"
+            @click="selectedPreset = 'custom'"
+          >
+            自定义
+          </button>
+        </div>
+        <div class="range-inputs">
+          <label class="field">
+            <span>起始时间</span>
+            <input type="text" ref="startPickerEl" class="dt-input" placeholder="选择开始时间" />
+          </label>
+          <label class="field">
+            <span>结束时间</span>
+            <input type="text" ref="endPickerEl" class="dt-input" placeholder="选择结束时间" />
+          </label>
+        </div>
+        <small class="field-hint">若留空则使用完整数据；时间精确到小时。</small>
+      </div>
+    </section>
+
     <section class="form-section grid">
       <label class="field">
         <span>初始资金</span>
@@ -300,6 +464,11 @@ const runBacktest = () => {
       <label class="field">
         <span>多周期 (如 D,W,M)</span>
         <input type="text" v-model="config.multi_freqs" />
+        <small class="field-hint">
+          输入单个周期（<code>D</code>、<code>1H</code>、<code>7m</code> 等）并用逗号分隔。
+          想要“高周期看趋势、低周期找入场”时，可写 <code>15m&gt;5m</code>（或 <code>15m-&gt;5m@趋势+入场</code>），表示：
+          先计算 15 分钟信号判断多空，只在 15 分钟保持多头时才考虑 5 分钟买入。行情粒度不足的周期会被自动忽略并给出提示。
+        </small>
       </label>
     </section>
 

@@ -25,6 +25,7 @@ from analytics import (
     generate_multi_timeframe_signals,
     generate_daily_brief,
     simple_rule_based_formula,
+    normalize_timeframe_token,
 )
 # We might need to adjust plotting functions to return data instead of calling plt.show()
 # For now, let's just focus on data endpoints.
@@ -106,12 +107,16 @@ class BacktestRequest(BaseModel):
     initial_capital: float
     fee_rate: float
     strategies: StrategyConfig
+    date_start: Optional[str] = None
+    date_end: Optional[str] = None
 
 class PlotRequest(BaseModel):
     strategy_index: int
 
 class MultiTimeframeRequest(BaseModel):
-    freqs: List[str]
+    freqs: Optional[List[str]] = None
+    pairs: Optional[List["TimeframePairRequest"]] = None
+    labels: Optional[Dict[str, str]] = None
 
 
 class StrategyTextRequest(BaseModel):
@@ -126,6 +131,15 @@ class AIAnalysisRequest(BaseModel):
     asset_label: Optional[str] = None
     limit_rows: int = 60
     extra_note: Optional[str] = None
+
+
+class TimeframePairRequest(BaseModel):
+    trend: str
+    entry: str
+    label: Optional[str] = None
+
+
+MultiTimeframeRequest.model_rebuild()
 
 # --- External Data Helpers ---
 
@@ -441,6 +455,8 @@ def api_run_backtest(req: BacktestRequest):
         initial_capital=req.initial_capital,
         fee_rate=req.fee_rate,
         strategies=strategies,
+        start_date=req.date_start,
+        end_date=req.date_end,
     )
 
     logs = []
@@ -610,29 +626,118 @@ def get_stop_suggestion():
     return {k: float(v) for k, v in info.items()}
 
 
+def _frame_to_kline(frame: pd.DataFrame) -> List[Dict[str, Any]]:
+    reset = frame.reset_index()
+    if "index" in reset.columns and "date" not in reset.columns:
+        reset.rename(columns={"index": "date"}, inplace=True)
+    if "date" not in reset.columns:
+        reset["date"] = reset.index.astype(str)
+    else:
+        reset["date"] = reset["date"].astype(str)
+    cols = [col for col in ["date", "open", "high", "low", "close"] if col in reset.columns]
+    return reset[cols].to_dict(orient="records")
+
+
+def _build_trend_bias(buy: pd.Series, sell: pd.Series) -> pd.Series:
+    state_val = 0
+    values = []
+    index = buy.index
+    for idx in index:
+        if bool(buy.loc[idx]):
+            state_val = 1
+        elif bool(sell.loc[idx]):
+            state_val = -1
+        values.append(state_val)
+    return pd.Series(values, index=index, dtype=float)
+
+
+def _build_pair_dataset(
+    trend_key: str,
+    entry_key: str,
+    frames: Dict[str, pd.DataFrame],
+    signals: Dict[str, Dict[str, pd.Series]],
+    custom_label: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    trend_frame = frames.get(trend_key)
+    entry_frame = frames.get(entry_key)
+    trend_signals = signals.get(trend_key)
+    entry_signals = signals.get(entry_key)
+    if (
+        trend_frame is None
+        or entry_frame is None
+        or trend_signals is None
+        or entry_signals is None
+    ):
+        return None
+
+    trend_buy = trend_signals["buy"].reindex(trend_frame.index).fillna(False)
+    trend_sell = trend_signals["sell"].reindex(trend_frame.index).fillna(False)
+    entry_buy = entry_signals["buy"].reindex(entry_frame.index).fillna(False)
+    entry_sell = entry_signals["sell"].reindex(entry_frame.index).fillna(False)
+
+    trend_bias = _build_trend_bias(trend_buy, trend_sell)
+    aligned_bias = trend_bias.reindex(entry_frame.index, method="ffill").fillna(0)
+    valid_buy = entry_buy & (aligned_bias >= 0.5)
+    valid_sell = entry_sell & (aligned_bias <= -0.5)
+    label = custom_label or f"{trend_key}->{entry_key}"
+
+    return {
+        "freq": label,
+        "label": custom_label or label,
+        "trend": trend_key,
+        "entry": entry_key,
+        "pair": True,
+        "kline": _frame_to_kline(entry_frame),
+        "buy_signals": valid_buy[valid_buy].index.astype(str).tolist(),
+        "sell_signals": valid_sell[valid_sell].index.astype(str).tolist(),
+        "meta": {
+            "pair_label": label,
+            "trend_bias": [
+                {"date": str(idx), "state": int(state)}
+                for idx, state in aligned_bias.tail(120).items()
+            ],
+        },
+    }
+
+
 @app.post("/analytics/multi_timeframe")
 def get_multi_timeframe(req: MultiTimeframeRequest):
     if state.df is None or not state.formula:
         raise HTTPException(status_code=400, detail="Run backtest first")
-    freqs = req.freqs or ["D", "W", "M"]
-    signals, frames = generate_multi_timeframe_signals(state.df, state.formula, freqs)
+    freqs = req.freqs or []
+    signals, frames, meta = generate_multi_timeframe_signals(state.df, state.formula, freqs)
+    if not frames:
+        raise HTTPException(status_code=400, detail="数据分辨率不足以生成所需周期")
     payload = []
     for freq_key, frame in frames.items():
-        frame_reset = frame.reset_index().rename(columns={"index": "date"})
-        frame_reset["date"] = frame_reset["date"].astype(str)
-        kline = frame_reset[["date", "open", "high", "low", "close"]].to_dict(orient="records")
         freq_signals = signals.get(freq_key, {})
-        buy_series = freq_signals.get("buy")
-        sell_series = freq_signals.get("sell")
-        buys = buy_series[buy_series].index.astype(str).tolist() if buy_series is not None else []
-        sells = sell_series[sell_series].index.astype(str).tolist() if sell_series is not None else []
+        buy_series = freq_signals.get("buy", pd.Series(dtype=bool)).reindex(frame.index).fillna(False)
+        sell_series = freq_signals.get("sell", pd.Series(dtype=bool)).reindex(frame.index).fillna(False)
         payload.append({
             "freq": freq_key,
-            "kline": kline,
-            "buy_signals": buys,
-            "sell_signals": sells,
+            "label": (req.labels or {}).get(freq_key, freq_key),
+            "kline": _frame_to_kline(frame),
+            "buy_signals": buy_series[buy_series].index.astype(str).tolist(),
+            "sell_signals": sell_series[sell_series].index.astype(str).tolist(),
         })
-    return payload
+
+    pair_payload = []
+    skipped_pairs: List[Dict[str, str]] = []
+    for pair in req.pairs or []:
+        try:
+            trend_label, _ = normalize_timeframe_token(pair.trend)
+            entry_label, _ = normalize_timeframe_token(pair.entry)
+        except ValueError as exc:
+            skipped_pairs.append({"pair": f"{pair.trend}->{pair.entry}", "reason": str(exc)})
+            continue
+        dataset = _build_pair_dataset(trend_label, entry_label, frames, signals, pair.label)
+        if dataset:
+            pair_payload.append(dataset)
+        else:
+            skipped_pairs.append({"pair": f"{trend_label}->{entry_label}", "reason": "周期数据缺失"})
+
+    meta["skipped_pairs"] = skipped_pairs
+    return {"series": payload, "pairs": pair_payload, "meta": meta}
 
 
 @app.post("/analytics/nlp_formula")

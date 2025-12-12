@@ -20,11 +20,12 @@ const renderChart = () => {
   const priceMap = new Map(props.dataset.kline?.map((row) => [row.date, row.close]) || []);
   const buildScatter = (list, adjust = 0) =>
     (list || []).map((d) => [d, (priceMap.get(d) || 0) * (1 + adjust)]);
+  const title = props.dataset.label || `${props.dataset.freq} 周期`;
   instance.setOption({
     backgroundColor: '#1e293b',
     tooltip: { trigger: 'axis' },
     grid: { left: 45, right: 16, top: 20, bottom: 30 },
-    title: { text: `${props.dataset.freq} 周期`, textStyle: { color: '#e2e8f0', fontSize: 13 } },
+    title: { text: title, textStyle: { color: '#e2e8f0', fontSize: 13 } },
     xAxis: { type: 'category', data: dates, boundaryGap: false },
     yAxis: { type: 'value', scale: true },
     series: [

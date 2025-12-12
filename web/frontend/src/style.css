@@ -465,6 +465,118 @@ label {
   margin-bottom: 16px;
 }
 
+.range-card {
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.range-presets {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chip-button {
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: transparent;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.chip-button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.35);
+}
+
+.chip-button.ghost {
+  border-style: dashed;
+}
+
+.range-inputs {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.range-inputs .field {
+  flex: 1;
+  min-width: 200px;
+}
+
+.range-card .dt-input {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  color: var(--text-primary);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  width: 100%;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.range-card .dt-input::placeholder {
+  color: var(--text-secondary);
+}
+
+.flatpickr-calendar {
+  background: rgba(15, 23, 42, 0.98);
+  border: none;
+  border-radius: 18px;
+  box-shadow: 0 20px 40px rgba(2, 6, 23, 0.65);
+  color: var(--text-primary);
+}
+
+.flatpickr-calendar.arrowTop:before,
+.flatpickr-calendar.arrowTop:after,
+.flatpickr-calendar.arrowBottom:before,
+.flatpickr-calendar.arrowBottom:after {
+  display: none;
+}
+
+.flatpickr-months .flatpickr-month,
+.flatpickr-weekdays {
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.flatpickr-day {
+  border-radius: 8px;
+  color: var(--text-primary);
+}
+
+.flatpickr-day.flatpickr-disabled {
+  color: rgba(148, 163, 184, 0.3);
+}
+
+.flatpickr-day:hover,
+.flatpickr-day.today,
+.flatpickr-day.selected {
+  background: var(--accent);
+  color: #fff;
+}
+
+.flatpickr-time input,
+.flatpickr-time .flatpickr-time-separator,
+.flatpickr-time .flatpickr-am-pm {
+  color: var(--text-primary);
+}
+
+.flatpickr-time input {
+  border-radius: 10px;
+  background: rgba(30, 41, 59, 0.7);
+}
+
 .form-section.grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
