@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, ref, watch, nextTick, onBeforeUnmount } from 'vue';
 import * as echarts from 'echarts';
+import { resolveEchartTheme } from '../lib/echartTheme';
 
 const props = defineProps({
   marketData: { type: Object, default: () => ({}) },
@@ -15,15 +16,26 @@ const chartContainer = ref(null);
 let chartInstance = null;
 let resizeObserver = null;
 
-const resolveBackgroundColor = () => {
-  if (typeof window === 'undefined') return '#1e293b';
+const readCssVar = (name, fallback) => {
+  if (typeof window === 'undefined') return fallback;
   const styles = getComputedStyle(document.documentElement);
-  const value = styles.getPropertyValue('--card-bg');
-  return value ? value.trim() : '#1e293b';
+  const value = styles.getPropertyValue(name);
+  return value ? value.trim() : fallback;
 };
 
-const buildOption = () => ({
-  backgroundColor: resolveBackgroundColor(),
+const resolveBackgroundColor = () => readCssVar('--card-bg', '#1e293b');
+
+const buildOption = () => {
+  const upColor = readCssVar('--danger', '#ef4444');
+  const downColor = readCssVar('--success', '#10b981');
+  const primaryLine = readCssVar('--accent', '#3b82f6');
+  const dynamicLine = readCssVar('--accent-secondary', '#a855f7');
+  const investMainColor = readCssVar('--warning', '#facc15');
+  const investHedgeColor = readCssVar('--success', '#34d399');
+  const buyColor = readCssVar('--success', '#22c55e');
+  const sellColor = readCssVar('--danger', '#f87171');
+  return {
+    backgroundColor: resolveBackgroundColor(),
   tooltip: {
     trigger: 'axis',
     axisPointer: { type: 'cross' },
@@ -50,10 +62,10 @@ const buildOption = () => ({
       type: 'candlestick',
       data: [],
       itemStyle: {
-        color: '#ef4444',
-        color0: '#10b981',
-        borderColor: '#ef4444',
-        borderColor0: '#10b981',
+        color: upColor,
+        color0: downColor,
+        borderColor: upColor,
+        borderColor0: downColor,
       },
     },
     {
@@ -63,7 +75,7 @@ const buildOption = () => ({
       yAxisIndex: 1,
       data: [],
       smooth: true,
-      lineStyle: { opacity: 0.8, color: '#3b82f6' },
+      lineStyle: { opacity: 0.8, color: primaryLine },
     },
     {
       name: '动态权益',
@@ -72,7 +84,7 @@ const buildOption = () => ({
       yAxisIndex: 1,
       data: [],
       smooth: true,
-      lineStyle: { opacity: 0.8, color: '#a855f7' },
+      lineStyle: { opacity: 0.8, color: dynamicLine },
     },
     {
       name: '主方向投入',
@@ -82,7 +94,7 @@ const buildOption = () => ({
       data: [],
       smooth: false,
       showSymbol: false,
-      lineStyle: { color: '#facc15', width: 1.5 },
+      lineStyle: { color: investMainColor, width: 1.5 },
     },
     {
       name: '对冲投入',
@@ -92,7 +104,7 @@ const buildOption = () => ({
       data: [],
       smooth: false,
       showSymbol: false,
-      lineStyle: { color: '#34d399', width: 1.2, type: 'dashed' },
+      lineStyle: { color: investHedgeColor, width: 1.2, type: 'dashed' },
     },
     {
       name: '买入信号',
@@ -100,7 +112,7 @@ const buildOption = () => ({
       data: [],
       symbol: 'triangle',
       symbolSize: 10,
-      itemStyle: { color: '#22c55e' },
+      itemStyle: { color: buyColor },
     },
     {
       name: '卖出信号',
@@ -109,15 +121,16 @@ const buildOption = () => ({
       symbol: 'triangle',
       symbolSize: 10,
       symbolRotate: 180,
-      itemStyle: { color: '#f87171' },
+      itemStyle: { color: sellColor },
     },
   ],
-});
+  };
+};
 
 const initChart = () => {
   if (!chartContainer.value) return;
   chartInstance?.dispose();
-  const themeName = props.theme === 'dark' ? 'dark' : undefined;
+  const themeName = resolveEchartTheme(props.theme);
   chartInstance = echarts.init(chartContainer.value, themeName);
   chartInstance.setOption(buildOption());
   updateChart();

@@ -40,6 +40,7 @@ const themeOptions = [
   { label: '自动', value: 'auto' },
   { label: '浅色', value: 'light' },
   { label: '深色', value: 'dark' },
+  { label: '莫兰迪', value: 'morandi' },
 ];
 let colorSchemeMedia = null;
 
@@ -161,7 +162,7 @@ const initThemeMode = () => {
   if (typeof window === 'undefined') return;
   try {
     const stored = localStorage.getItem(THEME_STORAGE_KEY);
-    if (stored && ['light', 'dark', 'auto'].includes(stored)) {
+    if (stored && ['light', 'dark', 'auto', 'morandi'].includes(stored)) {
       themeMode.value = stored;
     }
   } catch (err) {

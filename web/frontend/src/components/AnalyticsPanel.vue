@@ -3,6 +3,7 @@ import { ref, watch, nextTick, onBeforeUnmount, onMounted, computed } from 'vue'
 import axios from 'axios';
 import * as echarts from 'echarts';
 import SignalChart from './SignalChart.vue';
+import { resolveEchartTheme } from '../lib/echartTheme';
 
 const props = defineProps({
   results: { type: Array, default: () => [] },
@@ -63,7 +64,7 @@ const resolveCssVar = (name, fallback) => {
 
 const resolveCardBackground = () => resolveCssVar('--card-bg', '#1e293b');
 const resolveBorderColor = () => resolveCssVar('--border', '#334155');
-const currentThemeName = computed(() => (props.theme === 'dark' ? 'dark' : undefined));
+const currentThemeName = computed(() => resolveEchartTheme(props.theme));
 
 const normalizeFreqToken = (value) => {
   if (!value) return '';

@@ -1,39 +1,90 @@
 :root {
   --bg-color: #0f172a;
+  --bg-surface: radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.12), rgba(2, 6, 23, 0.9) 55%);
   --card-bg: #1e293b;
   --text-primary: #e2e8f0;
   --text-secondary: #94a3b8;
   --accent: #3b82f6;
+  --accent-secondary: #a855f7;
   --accent-glow: rgba(59, 130, 246, 0.5);
   --success: #10b981;
   --danger: #ef4444;
+  --warning: #facc15;
   --border: #334155;
   --surface-rgb: 15, 23, 42;
   --overlay-rgb: 2, 6, 23;
   --input-bg: #0f172a;
   --log-bg: #0f172a;
   --code-bg: #0f172a;
+  --card-surface: #141c2d;
+  --card-border: rgba(148, 163, 184, 0.18);
+  --card-shadow: 0 18px 45px rgba(2, 6, 23, 0.55);
+  --strategy-surface: linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(15, 23, 42, 0.75));
+  --strategy-border: rgba(59, 130, 246, 0.35);
+  --section-surface: rgba(59, 130, 246, 0.08);
+  --section-border: rgba(148, 163, 184, 0.35);
+  --divider-color: rgba(148, 163, 184, 0.45);
 }
 
 :root[data-theme='light'] {
   --bg-color: #f4f7fb;
+  --bg-surface: linear-gradient(180deg, #fdfcff 0%, #edf4ff 55%, #f7fbff 100%);
   --card-bg: #ffffff;
   --text-primary: #0f172a;
   --text-secondary: #475569;
   --accent: #2563eb;
+  --accent-secondary: #7c3aed;
   --accent-glow: rgba(37, 99, 235, 0.35);
   --success: #059669;
   --danger: #dc2626;
+  --warning: #f59e0b;
   --border: #cbd5f5;
   --surface-rgb: 248, 250, 252;
   --overlay-rgb: 15, 23, 42;
   --input-bg: #ffffff;
   --log-bg: #f8fafc;
   --code-bg: #f1f5f9;
+  --card-surface: #ffffff;
+  --card-border: #dde3f1;
+  --card-shadow: 0 20px 55px rgba(15, 23, 42, 0.12);
+  --strategy-surface: linear-gradient(135deg, rgba(226, 239, 255, 0.85), rgba(247, 250, 255, 0.9));
+  --strategy-border: rgba(59, 130, 246, 0.18);
+  --section-surface: rgba(225, 232, 255, 0.55);
+  --section-border: rgba(99, 102, 241, 0.2);
+  --divider-color: rgba(148, 163, 184, 0.6);
+}
+
+:root[data-theme='morandi'] {
+  --bg-color: #f6f2ed;
+  --bg-surface: radial-gradient(circle at 15% 20%, #f5f1ec 0%, #f7f4f6 45%, #f1f7f6 100%);
+  --card-bg: #fdfaf5;
+  --text-primary: #4c4844;
+  --text-secondary: #7b746d;
+  --accent: #8f97bf;
+  --accent-secondary: #d08a9d;
+  --accent-glow: rgba(143, 151, 191, 0.35);
+  --success: #7fa38c;
+  --danger: #d1847f;
+  --warning: #d8ba93;
+  --border: #d9d2c4;
+  --surface-rgb: 246, 242, 237;
+  --overlay-rgb: 76, 72, 69;
+  --input-bg: #fffdf8;
+  --log-bg: #faf7f2;
+  --code-bg: #f2ede4;
+  --card-surface: #fffcf5;
+  --card-border: #e6dacd;
+  --card-shadow: 0 24px 60px rgba(150, 133, 120, 0.18);
+  --strategy-surface: linear-gradient(140deg, rgba(199, 180, 198, 0.55), rgba(218, 204, 182, 0.65));
+  --strategy-border: rgba(174, 160, 180, 0.4);
+  --section-surface: rgba(255, 255, 255, 0.8);
+  --section-border: rgba(200, 178, 177, 0.65);
+  --divider-color: rgba(160, 150, 143, 0.65);
 }
 
 body {
   margin: 0;
+  background: var(--bg-surface, var(--bg-color));
   background-color: var(--bg-color);
   color: var(--text-primary);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -107,11 +158,11 @@ input[type="checkbox"] {
 
 
 .card {
-  background-color: var(--card-bg);
+  background-color: var(--card-surface, var(--card-bg));
   border-radius: 12px;
   padding: 20px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  border: 1px solid var(--border);
+  box-shadow: var(--card-shadow, 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06));
+  border: 1px solid var(--card-border, var(--border));
   backdrop-filter: blur(10px);
 }
 
@@ -703,15 +754,14 @@ label {
 .module-divider {
   height: 1px;
   margin: 8px 0 14px;
-  background: linear-gradient(90deg, rgba(148, 163, 184, 0), rgba(148, 163, 184, 0.5), rgba(148, 163, 184, 0));
+  background: linear-gradient(90deg, rgba(148, 163, 184, 0), var(--divider-color, rgba(148, 163, 184, 0.5)), rgba(148, 163, 184, 0));
 }
 
 .strategy-group {
-  border: none;
   border-radius: 18px;
   padding: 18px;
-  background: rgba(59, 130, 246, 0.08);
-  box-shadow: none;
+  border: 1px solid var(--strategy-border);
+  background: var(--strategy-surface);
 }
 
 .strategy-group .module-divider {
@@ -726,15 +776,11 @@ label {
 }
 
 .buyhedge-section {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--section-border);
   border-radius: 12px;
   padding: 12px;
-  background: rgba(255, 255, 255, 0.02);
-}
-
-:root[data-theme='light'] .buyhedge-section {
-  border-color: rgba(99, 102, 241, 0.25);
-  background: rgba(99, 102, 241, 0.06);
+  background: var(--section-surface);
+  backdrop-filter: blur(6px);
 }
 
 .buyhedge-section__title {

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import * as echarts from 'echarts';
+import { resolveEchartTheme } from '../lib/echartTheme';
 
 const props = defineProps({
   dataset: { type: Object, required: true },
@@ -10,6 +11,7 @@ const props = defineProps({
 
 const container = ref(null);
 let instance = null;
+let instanceTheme = null;
 
 const resolveCssVar = (name, fallback) => {
   if (typeof window === 'undefined') return fallback;
@@ -18,14 +20,19 @@ const resolveCssVar = (name, fallback) => {
   return value ? value.trim() : fallback;
 };
 
-const currentThemeName = () => (props.theme === 'dark' ? 'dark' : undefined);
 const cardBackground = () => resolveCssVar('--card-bg', '#1e293b');
 const textPrimary = () => resolveCssVar('--text-primary', '#e2e8f0');
+const accentColor = () => resolveCssVar('--accent', '#3b82f6');
+const buyColor = () => resolveCssVar('--success', '#34d399');
+const sellColor = () => resolveCssVar('--danger', '#f87171');
 
 const renderChart = () => {
   if (!container.value || !props.dataset) return;
-  if (!instance) {
-    instance = echarts.init(container.value, currentThemeName());
+  const themeName = resolveEchartTheme(props.theme);
+  if (!instance || instanceTheme !== themeName) {
+    instance?.dispose();
+    instance = echarts.init(container.value, themeName);
+    instanceTheme = themeName;
   }
   const dates = props.dataset.kline?.map((row) => row.date) || [];
   const closeSeries = props.dataset.kline?.map((row) => row.close) || [];
@@ -46,7 +53,7 @@ const renderChart = () => {
         type: 'line',
         data: closeSeries,
         smooth: true,
-        lineStyle: { color: '#38bdf8' },
+        lineStyle: { color: accentColor() },
         areaStyle: { opacity: 0.08 },
       },
       {
@@ -55,7 +62,7 @@ const renderChart = () => {
         data: buildScatter(props.dataset.buy_signals, -0.01),
         symbol: 'triangle',
         symbolSize: 9,
-        itemStyle: { color: '#34d399' },
+        itemStyle: { color: buyColor() },
       },
       {
         name: 'Sell',
@@ -64,7 +71,7 @@ const renderChart = () => {
         symbol: 'triangle',
         symbolRotate: 180,
         symbolSize: 9,
-        itemStyle: { color: '#f87171' },
+        itemStyle: { color: sellColor() },
       },
     ],
   });
@@ -85,6 +92,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   instance?.dispose();
+  instance = null;
+  instanceTheme = null;
 });
 </script>
 
