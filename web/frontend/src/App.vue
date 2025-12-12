@@ -29,6 +29,7 @@ const aiError = ref('');
 const datasetSignature = ref('');
 const cachedSignature = ref('');
 const aiCardExpanded = ref(false);
+let aiHoverTimer = null;
 const overlayBlocking = ref(false);
 const overlayMessage = ref({ title: '', detail: '' });
 let aiTicket = 0;
@@ -208,10 +209,15 @@ const requestAIInsight = async (force = false) => {
 };
 
 const handleAIMouseEnter = () => {
-  aiCardExpanded.value = true;
+  clearTimeout(aiHoverTimer);
+  aiHoverTimer = setTimeout(() => {
+    aiCardExpanded.value = true;
+  }, 1000);
 };
 
 const handleAIMouseLeave = () => {
+  clearTimeout(aiHoverTimer);
+  aiHoverTimer = null;
   aiCardExpanded.value = false;
 };
 </script>
