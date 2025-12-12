@@ -203,6 +203,16 @@ const handleOverlayUnblock = () => {
 const handleRun = async (configPayload) => {
   if (!configPayload || !configPayload.payload) return;
   const { payload, meta } = configPayload;
+  if (typeof window !== 'undefined') {
+    requestAnimationFrame(() => {
+      const target = document.querySelector('.analytics-panel');
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    });
+  }
   lastConfigMeta.value = {
     initialCapital: meta?.initialCapital ?? lastConfigMeta.value.initialCapital,
     multiFreqs: meta?.multiFreqs ?? lastConfigMeta.value.multiFreqs,
