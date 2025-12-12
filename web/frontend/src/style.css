@@ -8,6 +8,28 @@
   --success: #10b981;
   --danger: #ef4444;
   --border: #334155;
+  --surface-rgb: 15, 23, 42;
+  --overlay-rgb: 2, 6, 23;
+  --input-bg: #0f172a;
+  --log-bg: #0f172a;
+  --code-bg: #0f172a;
+}
+
+:root[data-theme='light'] {
+  --bg-color: #f4f7fb;
+  --card-bg: #ffffff;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --accent: #2563eb;
+  --accent-glow: rgba(37, 99, 235, 0.35);
+  --success: #059669;
+  --danger: #dc2626;
+  --border: #cbd5f5;
+  --surface-rgb: 248, 250, 252;
+  --overlay-rgb: 15, 23, 42;
+  --input-bg: #ffffff;
+  --log-bg: #f8fafc;
+  --code-bg: #f1f5f9;
 }
 
 body {
@@ -59,7 +81,7 @@ button:disabled:hover {
 input:not([type="checkbox"]):not([type="radio"]),
 textarea,
 select {
-  background-color: #0f172a;
+  background-color: var(--input-bg);
   border: 1px solid var(--border);
   color: var(--text-primary);
   padding: 8px;
@@ -152,7 +174,7 @@ label {
   justify-content: space-between;
   align-items: center;
   border-bottom: 1px solid var(--border);
-  background: rgba(15, 23, 42, 0.9);
+  background: rgba(var(--surface-rgb), 0.9);
 }
 
 .app-header h1 {
@@ -166,16 +188,47 @@ label {
   font-size: 0.9rem;
 }
 
-.status {
-  padding: 6px 14px;
-  border-radius: 20px;
-  border: 1px solid var(--border);
-  font-size: 0.85rem;
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
-.status.running {
-  border-color: var(--accent);
-  color: var(--accent);
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(var(--surface-rgb), 0.45);
+}
+
+.theme-options {
+  display: flex;
+  gap: 6px;
+}
+
+.theme-chip {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: none;
+}
+
+.theme-chip:hover {
+  color: var(--text-primary);
+}
+
+.theme-chip.active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 12px var(--accent-glow);
 }
 
 .app-main {
@@ -235,7 +288,7 @@ label {
 
 .log-view {
   flex: 1;
-  background: #0f172a;
+  background: var(--log-bg);
   border-radius: 10px;
   padding: 12px;
   font-family: 'SFMono-Regular', Consolas, monospace;
@@ -268,7 +321,7 @@ label {
 
 .ai-card.expanded {
   max-height: 560px;
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.6);
+  box-shadow: 0 12px 30px rgba(var(--overlay-rgb), 0.35);
 }
 
 .ai-card::after {
@@ -278,7 +331,7 @@ label {
   right: 0;
   bottom: 0;
   height: 72px;
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0) 0%, rgba(15, 23, 42, 0.9) 80%);
+  background: linear-gradient(180deg, rgba(var(--surface-rgb), 0) 0%, rgba(var(--surface-rgb), 0.9) 80%);
   pointer-events: none;
   transition: opacity 0.25s ease;
 }
@@ -327,7 +380,7 @@ label {
   line-height: 1.5;
   font-size: 0.92rem;
   color: var(--text-primary);
-  background: rgba(15, 23, 42, 0.6);
+  background: rgba(var(--surface-rgb), 0.6);
   border: 1px solid rgba(148, 163, 184, 0.12);
   border-radius: 8px;
   padding: 12px;
@@ -348,7 +401,7 @@ label {
 .global-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(2, 6, 23, 0.72);
+  background: rgba(var(--overlay-rgb), 0.72);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -357,7 +410,7 @@ label {
 }
 
 .overlay-card {
-  background: rgba(15, 23, 42, 0.95);
+  background: rgba(var(--surface-rgb), 0.95);
   border-radius: 16px;
   border: 1px solid rgba(148, 163, 184, 0.3);
   padding: 24px 32px;
@@ -365,7 +418,7 @@ label {
   gap: 18px;
   align-items: center;
   min-width: 320px;
-  box-shadow: 0 20px 50px rgba(2, 6, 23, 0.6);
+  box-shadow: 0 20px 50px rgba(var(--overlay-rgb), 0.6);
 }
 
 .overlay-spinner {
@@ -442,7 +495,7 @@ label {
 }
 
 .markdown-body pre {
-  background: rgba(15, 23, 42, 0.8);
+  background: rgba(var(--surface-rgb), 0.8);
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 6px;
   padding: 0.75rem;
@@ -466,7 +519,7 @@ label {
 }
 
 .range-card {
-  background: rgba(15, 23, 42, 0.45);
+  background: rgba(var(--surface-rgb), 0.45);
   border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 12px;
   padding: 12px;
@@ -514,7 +567,7 @@ label {
 }
 
 .range-card .dt-input {
-  background: rgba(15, 23, 42, 0.9);
+  background: rgba(var(--surface-rgb), 0.9);
   border: 1px solid rgba(148, 163, 184, 0.35);
   color: var(--text-primary);
   border-radius: 12px;
@@ -530,10 +583,10 @@ label {
 }
 
 .flatpickr-calendar {
-  background: rgba(15, 23, 42, 0.98);
+  background: rgba(var(--surface-rgb), 0.98);
   border: none;
   border-radius: 18px;
-  box-shadow: 0 20px 40px rgba(2, 6, 23, 0.65);
+  box-shadow: 0 20px 40px rgba(var(--overlay-rgb), 0.65);
   color: var(--text-primary);
 }
 
@@ -615,7 +668,7 @@ label {
 
 .code-area {
   font-family: 'SFMono-Regular', Consolas, monospace;
-  background: #0f172a;
+  background: var(--code-bg);
 }
 
 .button-row {
@@ -643,7 +696,7 @@ label {
 
 .strategy-card.dynamic-card {
   border: 1px solid rgba(59, 130, 246, 0.4);
-  background: radial-gradient(circle at top right, rgba(20, 184, 166, 0.15), rgba(15, 23, 42, 0.65));
+  background: radial-gradient(circle at top right, rgba(20, 184, 166, 0.15), rgba(var(--surface-rgb), 0.65));
   position: relative;
 }
 
@@ -688,7 +741,7 @@ label {
   flex-direction: column;
   gap: 8px;
   padding: 10px 12px;
-  background: rgba(15, 23, 42, 0.35);
+  background: rgba(var(--surface-rgb), 0.35);
   border-radius: 8px;
 }
 
@@ -731,7 +784,7 @@ label {
   border-radius: 12px;
   padding: 12px;
   text-align: left;
-  background: rgba(15, 23, 42, 0.75);
+  background: rgba(var(--surface-rgb), 0.75);
   cursor: pointer;
   transition: border 0.2s, transform 0.2s, box-shadow 0.2s, background 0.2s;
   min-width: 0;
@@ -767,7 +820,7 @@ label {
 }
 
 .category-card[data-key='dynamic']:not(.active) {
-  background: rgba(18, 30, 48, 0.92);
+  background: rgba(var(--surface-rgb), 0.92);
   box-shadow: inset 0 0 6px rgba(59, 130, 246, 0.1);
 }
 
@@ -861,10 +914,10 @@ table {
 }
 
 .table-wrapper {
-  background: rgba(15, 23, 42, 0.85);
+  background: rgba(var(--surface-rgb), 0.85);
   border-radius: 16px;
   border: 1px solid rgba(148, 163, 184, 0.25);
-  box-shadow: 0 8px 20px rgba(2, 6, 23, 0.4);
+  box-shadow: 0 8px 20px rgba(var(--overlay-rgb), 0.4);
   overflow: hidden;
 }
 
@@ -894,12 +947,12 @@ table.modern-table td {
 
 table.modern-table tbody tr {
   border-top: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(15, 23, 42, 0.4);
+  background: rgba(var(--surface-rgb), 0.4);
   transition: background 0.2s ease, transform 0.2s ease;
 }
 
 table.modern-table tbody tr:nth-child(even) {
-  background: rgba(15, 23, 42, 0.55);
+  background: rgba(var(--surface-rgb), 0.55);
 }
 
 table.modern-table tbody tr:hover {
@@ -914,7 +967,7 @@ table.modern-table tbody tr:hover {
 }
 
 .stop-grid div {
-  background: rgba(15, 23, 42, 0.6);
+  background: rgba(var(--surface-rgb), 0.6);
   border-radius: 10px;
   padding: 10px;
   text-align: center;
@@ -961,7 +1014,7 @@ table.modern-table tbody tr:hover {
 .brief-view pre {
   white-space: pre-wrap;
   font-family: inherit;
-  background: rgba(15, 23, 42, 0.6);
+  background: rgba(var(--surface-rgb), 0.6);
   border-radius: 10px;
   padding: 16px;
 }
@@ -975,7 +1028,7 @@ table.modern-table tbody tr:hover {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.85);
+  background: rgba(var(--surface-rgb), 0.85);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1014,7 +1067,7 @@ table.modern-table tbody tr:hover {
 }
 
 .builder-section {
-  background: rgba(15, 23, 42, 0.5);
+  background: rgba(var(--surface-rgb), 0.5);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 12px;
   padding: 14px;
@@ -1054,7 +1107,7 @@ table.modern-table tbody tr:hover {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
   padding: 12px;
-  background: rgba(15, 23, 42, 0.55);
+  background: rgba(var(--surface-rgb), 0.55);
 }
 
 .entry-header {
@@ -1090,6 +1143,7 @@ table.modern-table tbody tr:hover {
   flex-direction: column;
   gap: 4px;
   min-width: 220px;
+  margin-bottom: 8px;
 }
 
 .joiner-row label {
@@ -1113,7 +1167,7 @@ table.modern-table tbody tr:hover {
 
 .entry-preview {
   margin-top: 12px;
-  background: #0f172a;
+  background: var(--code-bg);
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 10px;
@@ -1145,7 +1199,7 @@ table.modern-table tbody tr:hover {
 }
 
 .preview-section .formula-preview {
-  background: #0f172a;
+  background: var(--code-bg);
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 12px;

@@ -5,15 +5,27 @@ import * as echarts from 'echarts';
 const props = defineProps({
   dataset: { type: Object, required: true },
   height: { type: Number, default: 240 },
+  theme: { type: String, default: 'dark' },
 });
 
 const container = ref(null);
 let instance = null;
 
+const resolveCssVar = (name, fallback) => {
+  if (typeof window === 'undefined') return fallback;
+  const styles = getComputedStyle(document.documentElement);
+  const value = styles.getPropertyValue(name);
+  return value ? value.trim() : fallback;
+};
+
+const currentThemeName = () => (props.theme === 'dark' ? 'dark' : undefined);
+const cardBackground = () => resolveCssVar('--card-bg', '#1e293b');
+const textPrimary = () => resolveCssVar('--text-primary', '#e2e8f0');
+
 const renderChart = () => {
   if (!container.value || !props.dataset) return;
   if (!instance) {
-    instance = echarts.init(container.value, 'dark');
+    instance = echarts.init(container.value, currentThemeName());
   }
   const dates = props.dataset.kline?.map((row) => row.date) || [];
   const closeSeries = props.dataset.kline?.map((row) => row.close) || [];
@@ -22,10 +34,10 @@ const renderChart = () => {
     (list || []).map((d) => [d, (priceMap.get(d) || 0) * (1 + adjust)]);
   const title = props.dataset.label || `${props.dataset.freq} 周期`;
   instance.setOption({
-    backgroundColor: '#1e293b',
+    backgroundColor: cardBackground(),
     tooltip: { trigger: 'axis' },
+    title: { show: false },
     grid: { left: 45, right: 16, top: 20, bottom: 30 },
-    title: { text: title, textStyle: { color: '#e2e8f0', fontSize: 13 } },
     xAxis: { type: 'category', data: dates, boundaryGap: false },
     yAxis: { type: 'value', scale: true },
     series: [
@@ -60,7 +72,7 @@ const renderChart = () => {
 };
 
 watch(
-  () => props.dataset,
+  () => [props.dataset, props.theme],
   () => {
     nextTick(() => renderChart());
   },
@@ -77,11 +89,26 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="signal-chart" :style="{ height: height + 'px' }" ref="container"></div>
+  <div class="signal-chart" :style="{ height: height + 'px' }">
+    <div class="chart-title">{{ dataset.label || dataset.freq }}</div>
+    <div class="chart-body" ref="container"></div>
+  </div>
 </template>
 
 <style scoped>
 .signal-chart {
   width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.chart-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 8px 0 8px;
+  text-align: center;
+}
+.chart-body {
+  flex: 1;
 }
 </style>

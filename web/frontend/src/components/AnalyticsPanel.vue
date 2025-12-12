@@ -9,6 +9,7 @@ const props = defineProps({
   hasData: { type: Boolean, default: false },
   initialCapital: { type: Number, default: 100000 },
   multiFreqs: { type: String, default: 'D,W,M' },
+  theme: { type: String, default: 'dark' },
 });
 
 const emit = defineEmits(['selectStrategy']);
@@ -50,6 +51,18 @@ let dynamicEquityChartInstance = null;
 let dynamicInvestmentChartInstance = null;
 let reportChartInstance = null;
 const selectedResultIndex = ref(0);
+const reportDirty = ref(true);
+
+const resolveCssVar = (name, fallback) => {
+  if (typeof window === 'undefined') return fallback;
+  const styles = getComputedStyle(document.documentElement);
+  const value = styles.getPropertyValue(name);
+  return value ? value.trim() : fallback;
+};
+
+const resolveCardBackground = () => resolveCssVar('--card-bg', '#1e293b');
+const resolveBorderColor = () => resolveCssVar('--border', '#334155');
+const currentThemeName = computed(() => (props.theme === 'dark' ? 'dark' : undefined));
 
 const normalizeFreqToken = (value) => {
   if (!value) return '';
@@ -143,7 +156,7 @@ const renderDynamicEquityChart = () => {
     dynamicEquityChartInstance = null;
   }
   if (!dynamicEquityChartInstance) {
-    dynamicEquityChartInstance = echarts.init(dom, 'dark');
+    dynamicEquityChartInstance = echarts.init(dom, currentThemeName.value);
   }
   const staticSeries = equityCurveStatic.value?.map(([ts, val]) => [ts, val]) || [];
   const dynamicSeriesArr = equityCurveDynamic.value?.map(([ts, val]) => [ts, val]) || [];
@@ -173,7 +186,7 @@ const renderDynamicInvestmentChart = () => {
     dynamicInvestmentChartInstance = null;
   }
   if (!dynamicInvestmentChartInstance) {
-    dynamicInvestmentChartInstance = echarts.init(dom, 'dark');
+    dynamicInvestmentChartInstance = echarts.init(dom, currentThemeName.value);
   }
   const investMain = investmentSeriesMain.value || [];
   const investHedge = investmentSeriesHedge.value || [];
@@ -219,6 +232,7 @@ watch(
       if (selectedResultIndex.value < 0) selectedResultIndex.value = 0;
       reportData.value = null;
       reportError.value = '';
+      reportDirty.value = true;
     }
   },
   { immediate: true }
@@ -279,9 +293,11 @@ const fetchReport = async () => {
       strategy_index: selectedResultIndex.value || 0,
     });
     reportData.value = res.data || null;
+    reportDirty.value = false;
   } catch (e) {
     console.error(e);
     reportError.value = e.response?.data?.detail || '报告获取失败';
+    reportDirty.value = true;
   } finally {
     reportLoading.value = false;
     await nextTick();
@@ -385,16 +401,16 @@ const renderScoreChart = () => {
     scoreChartInstance = null;
   }
   if (!scoreChartInstance) {
-    scoreChartInstance = echarts.init(scoreChartRef.value, 'dark');
+    scoreChartInstance = echarts.init(scoreChartRef.value, currentThemeName.value);
   }
   const dates = scores.value.map((row) => row.date);
   const values = scores.value.map((row) => row.total_score);
   scoreChartInstance.setOption({
-    backgroundColor: '#1e293b',
+    backgroundColor: resolveCardBackground(),
     grid: { left: 45, right: 20, top: 15, bottom: 25 },
     tooltip: { trigger: 'axis' },
     xAxis: { type: 'category', data: dates, boundaryGap: false },
-    yAxis: { type: 'value', splitLine: { lineStyle: { color: '#374151' } } },
+    yAxis: { type: 'value', splitLine: { lineStyle: { color: resolveBorderColor() } } },
     series: [
       {
         type: 'line',
@@ -421,7 +437,7 @@ const renderReportDrawdown = () => {
     reportChartInstance = null;
   }
   if (!reportChartInstance) {
-    reportChartInstance = echarts.init(dom, 'dark');
+    reportChartInstance = echarts.init(dom, currentThemeName.value);
   }
   const dates = series.map((item) => item.date);
   const values = series.map((item) => item.value);
@@ -432,7 +448,7 @@ const renderReportDrawdown = () => {
     yAxis: {
       type: 'value',
       axisLabel: { formatter: '{value}%' },
-      splitLine: { lineStyle: { color: '#374151' } },
+      splitLine: { lineStyle: { color: resolveBorderColor() } },
     },
     series: [
       {
@@ -480,6 +496,7 @@ watch(
     }
     reportData.value = null;
     reportError.value = '';
+    reportDirty.value = true;
     if (activeTab.value === 'report' && props.hasData) {
       fetchReport();
     }
@@ -491,6 +508,7 @@ watch(
   () => {
     reportData.value = null;
     reportError.value = '';
+    reportDirty.value = true;
     if (activeTab.value === 'report' && props.hasData) {
       fetchReport();
     }
@@ -507,6 +525,25 @@ const disposeCharts = () => {
   dynamicInvestmentChartInstance = null;
   reportChartInstance = null;
 };
+
+watch(
+  () => props.theme,
+  () => {
+    disposeCharts();
+    nextTick(() => {
+      if (activeTab.value === 'scores' && scores.value.length) {
+        renderScoreChart();
+      }
+      if (activeTab.value === 'dynamic') {
+        renderDynamicEquityChart();
+        renderDynamicInvestmentChart();
+      }
+      if (activeTab.value === 'report' && reportDrawdownSeries.value.length) {
+        renderReportDrawdown();
+      }
+    });
+  }
+);
 
 const handleResize = () => {
   scoreChartInstance?.resize();
@@ -548,7 +585,7 @@ const switchTab = (tab) => {
     });
   }
   if (tab === 'report') {
-    if (!reportData.value && !reportLoading.value) {
+    if ((reportDirty.value || !reportData.value) && !reportLoading.value) {
       fetchReport();
     } else {
       nextTick(() => renderReportDrawdown());
@@ -667,6 +704,7 @@ watch(
     }
   }
 );
+
 </script>
 
 <template>
@@ -940,7 +978,7 @@ watch(
         <div v-if="!multiSignals.length" class="empty">{{ multiMessage || '点击标签以加载多周期信号' }}</div>
         <div v-else>
           <div class="multi-charts">
-            <SignalChart v-for="item in multiSignals" :key="item.freq" :dataset="item" :height="220" />
+            <SignalChart v-for="item in multiSignals" :key="item.freq" :dataset="item" :height="220" :theme="theme" />
           </div>
           <div v-if="multiMessage" class="empty small">{{ multiMessage }}</div>
         </div>
@@ -1068,8 +1106,8 @@ watch(
   gap: 16px;
 }
 .dynamic-chart-card {
-  background: #0f172a;
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px;
   display: flex;
@@ -1088,7 +1126,7 @@ watch(
 }
 .chart-header span {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--text-secondary);
 }
 .mini-chart {
   width: 100%;
@@ -1101,8 +1139,8 @@ watch(
   gap: 16px;
 }
 .summary-block {
-  background: #0f172a;
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px;
 }
@@ -1147,7 +1185,7 @@ watch(
   margin-top: 12px;
 }
 .brief-card {
-  background: rgba(15, 23, 42, 0.85);
+  background: rgba(var(--surface-rgb), 0.85);
   border-radius: 16px;
   border: 1px solid rgba(148, 163, 184, 0.25);
   padding: 16px 18px;
@@ -1206,7 +1244,7 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 16px;
-  background: rgba(15, 23, 42, 0.85);
+  background: rgba(var(--surface-rgb), 0.85);
   border-radius: 18px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   padding: 18px;
@@ -1224,13 +1262,13 @@ watch(
 }
 .report-header p {
   margin: 4px 0 0;
-  color: #94a3b8;
+  color: var(--text-secondary);
   font-size: 0.85rem;
 }
 .ghost-btn {
   background: transparent;
-  border: 1px solid rgba(148, 163, 184, 0.4);
-  color: #e2e8f0;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
   border-radius: 999px;
   padding: 6px 14px;
   font-size: 0.85rem;
@@ -1238,8 +1276,8 @@ watch(
   transition: all 0.2s ease;
 }
 .ghost-btn:hover {
-  border-color: #38bdf8;
-  color: #38bdf8;
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .report-summary-grid {
   display: grid;
@@ -1247,7 +1285,7 @@ watch(
   gap: 12px;
 }
 .report-kpi {
-  background: #0f172a;
+  background: var(--card-bg);
   border-radius: 14px;
   padding: 12px;
   border: 1px solid rgba(148, 163, 184, 0.12);
@@ -1258,7 +1296,7 @@ watch(
 }
 .report-kpi .label {
   font-size: 0.8rem;
-  color: #94a3b8;
+  color: var(--text-secondary);
 }
 .report-kpi .value {
   font-size: 1.15rem;
@@ -1275,7 +1313,7 @@ watch(
   gap: 16px;
 }
 .report-panel {
-  background: #0c1220;
+  background: var(--card-bg);
   border-radius: 16px;
   border: 1px solid rgba(148, 163, 184, 0.15);
   padding: 14px;
@@ -1297,7 +1335,7 @@ watch(
   font-size: 0.95rem;
 }
 .panel-header span {
-  color: #94a3b8;
+  color: var(--text-secondary);
   font-size: 0.75rem;
 }
 .report-chart {
@@ -1329,7 +1367,7 @@ watch(
   text-align: center;
 }
 .monthly-matrix thead {
-  background: rgba(148, 163, 184, 0.08);
+  background: rgba(var(--surface-rgb), 0.08);
 }
 .month-cell {
   font-variant-numeric: tabular-nums;
@@ -1342,7 +1380,7 @@ watch(
 }
 .year-label {
   text-align: left;
-  color: #e2e8f0;
+  color: var(--text-primary);
   font-weight: 600;
 }
 .year-total {

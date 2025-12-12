@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import axios from 'axios';
 import { marked } from 'marked';
 import ConfigPanel from './components/ConfigPanel.vue';
@@ -12,6 +12,7 @@ marked.setOptions({
 });
 
 const AI_STORAGE_KEY = 'stocktool_ai_insight';
+const THEME_STORAGE_KEY = 'stocktool_theme_mode';
 
 const marketData = ref({ kline: [], buy_signals: [], sell_signals: [] });
 const backtestResults = ref([]);
@@ -33,6 +34,14 @@ let aiHoverTimer = null;
 const overlayBlocking = ref(false);
 const overlayMessage = ref({ title: '', detail: '' });
 let aiTicket = 0;
+const themeMode = ref('auto');
+const systemPrefersDark = ref(true);
+const themeOptions = [
+  { label: '自动', value: 'auto' },
+  { label: '浅色', value: 'light' },
+  { label: '深色', value: 'dark' },
+];
+let colorSchemeMedia = null;
 
 const overlayActive = computed(() => isRunning.value || overlayBlocking.value);
 const overlayTitle = computed(() => {
@@ -50,6 +59,12 @@ const aiRenderedHtml = computed(() => {
   const text = aiResult.value?.analysis?.trim();
   if (!text) return '';
   return marked.parse(text);
+});
+const resolvedTheme = computed(() => {
+  if (themeMode.value === 'auto') {
+    return systemPrefersDark.value ? 'dark' : 'light';
+  }
+  return themeMode.value;
 });
 
 const computeDatasetSignature = (data) => {
@@ -109,8 +124,65 @@ const handleDatasetSignature = (data) => {
   }
 };
 
+const applyTheme = (theme) => {
+  if (typeof document === 'undefined') return;
+  document.documentElement.dataset.theme = theme;
+};
+
+watch(
+  resolvedTheme,
+  (theme) => {
+    applyTheme(theme);
+  },
+  { immediate: true },
+);
+
+const persistThemeMode = (mode) => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, mode);
+  } catch (err) {
+    console.warn('Failed to persist theme mode', err);
+  }
+};
+
+const setThemeMode = (mode) => {
+  const allowed = themeOptions.map((opt) => opt.value);
+  const next = allowed.includes(mode) ? mode : 'auto';
+  themeMode.value = next;
+  persistThemeMode(next);
+};
+
+const handleSystemThemeChange = (event) => {
+  systemPrefersDark.value = !!event.matches;
+};
+
+const initThemeMode = () => {
+  if (typeof window === 'undefined') return;
+  try {
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    if (stored && ['light', 'dark', 'auto'].includes(stored)) {
+      themeMode.value = stored;
+    }
+  } catch (err) {
+    console.warn('Failed to load theme preference', err);
+  }
+  colorSchemeMedia = window.matchMedia('(prefers-color-scheme: dark)');
+  if (colorSchemeMedia) {
+    systemPrefersDark.value = colorSchemeMedia.matches;
+    colorSchemeMedia.addEventListener('change', handleSystemThemeChange);
+  }
+};
+
 onMounted(() => {
   loadPersistedAIInsight();
+  initThemeMode();
+});
+
+onBeforeUnmount(() => {
+  if (colorSchemeMedia) {
+    colorSchemeMedia.removeEventListener('change', handleSystemThemeChange);
+  }
 });
 
 const handleOverlayBlock = (info) => {
@@ -241,7 +313,23 @@ const handleAIMouseLeave = () => {
         <h1>StockTool 云端量化</h1>
         <p>一键上传 CSV · 自动回测 · 智能洞察</p>
       </div>
-      <span class="status" :class="{ running: isRunning }">{{ isRunning ? '回测执行中…' : '就绪' }}</span>
+      <div class="header-actions">
+        <div class="theme-toggle" role="group" aria-label="颜色模式">
+          <div class="theme-options">
+            <button
+              v-for="option in themeOptions"
+              :key="option.value"
+              type="button"
+              class="theme-chip"
+              :class="{ active: themeMode === option.value }"
+              :aria-pressed="themeMode === option.value"
+              @click="setThemeMode(option.value)"
+            >
+              {{ option.label }}
+            </button>
+          </div>
+        </div>
+      </div>
     </header>
 
     <main class="app-main">
@@ -280,6 +368,7 @@ const handleAIMouseLeave = () => {
             :dynamicEquity="dynamicEquity"
             :investmentMain="investmentCurveMain"
             :investmentHedge="investmentCurveHedge"
+            :theme="resolvedTheme"
           />
         </div>
         <div
@@ -328,6 +417,7 @@ const handleAIMouseLeave = () => {
           :hasData="hasData"
           :initialCapital="lastConfigMeta.initialCapital"
           :multiFreqs="lastConfigMeta.multiFreqs"
+          :theme="resolvedTheme"
           @select-strategy="handleSelectStrategy"
         />
       </section>

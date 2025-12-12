@@ -8,14 +8,22 @@ const props = defineProps({
   dynamicEquity: { type: Array, default: () => [] },
   investmentMain: { type: Array, default: () => [] },
   investmentHedge: { type: Array, default: () => [] },
+  theme: { type: String, default: 'dark' },
 });
 
 const chartContainer = ref(null);
 let chartInstance = null;
 let resizeObserver = null;
 
+const resolveBackgroundColor = () => {
+  if (typeof window === 'undefined') return '#1e293b';
+  const styles = getComputedStyle(document.documentElement);
+  const value = styles.getPropertyValue('--card-bg');
+  return value ? value.trim() : '#1e293b';
+};
+
 const buildOption = () => ({
-  backgroundColor: '#1e293b',
+  backgroundColor: resolveBackgroundColor(),
   tooltip: {
     trigger: 'axis',
     axisPointer: { type: 'cross' },
@@ -109,8 +117,10 @@ const buildOption = () => ({
 const initChart = () => {
   if (!chartContainer.value) return;
   chartInstance?.dispose();
-  chartInstance = echarts.init(chartContainer.value, 'dark');
+  const themeName = props.theme === 'dark' ? 'dark' : undefined;
+  chartInstance = echarts.init(chartContainer.value, themeName);
   chartInstance.setOption(buildOption());
+  updateChart();
 };
 
 const updateChart = () => {
@@ -156,6 +166,13 @@ watch(
     nextTick(() => updateChart());
   },
   { deep: true }
+);
+
+watch(
+  () => props.theme,
+  () => {
+    nextTick(() => initChart());
+  }
 );
 
 onMounted(() => {
