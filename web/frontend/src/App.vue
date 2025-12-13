@@ -321,7 +321,7 @@ const handleAIMouseLeave = () => {
 
     <header class="app-header">
       <div>
-        <h1>StockTool 云端量化</h1>
+        <h1>StockTool 云端量化 V1.0.2</h1>
         <p>一键上传 CSV · 自动回测 · 智能洞察</p>
       </div>
       <div class="header-actions">
