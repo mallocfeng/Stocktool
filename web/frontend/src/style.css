@@ -428,8 +428,8 @@ label {
 }
 
 .ai-card {
-  min-height: 120px;
-  max-height: 150px;
+  min-height: 170px;
+  max-height: 200px;
   overflow: hidden;
   transition: max-height 0.35s ease, box-shadow 0.2s ease;
   position: relative;
