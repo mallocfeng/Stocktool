@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 
 import numpy as np
 import pandas as pd
@@ -59,6 +59,59 @@ class BacktestResult:
         return d
 
 
+class TPlusOneGuard:
+    """Tracks individual lots so sells obey the T+1 constraint."""
+
+    def __init__(self) -> None:
+        self._lots: List[Tuple[pd.Timestamp, int]] = []
+
+    @staticmethod
+    def _normalize_day(ts: pd.Timestamp) -> pd.Timestamp:
+        if isinstance(ts, pd.Timestamp):
+            return pd.Timestamp(ts.date())
+        return pd.Timestamp(ts).normalize()
+
+    def add(self, date: pd.Timestamp, shares: int) -> None:
+        if shares <= 0:
+            return
+        self._lots.append((self._normalize_day(date), int(shares)))
+
+    def available(self, date: pd.Timestamp) -> int:
+        trade_day = self._normalize_day(date)
+        return int(sum(shares for lot_day, shares in self._lots if trade_day > lot_day))
+
+    def can_sell(self, date: pd.Timestamp, shares: int) -> bool:
+        if shares <= 0:
+            return True
+        return self.available(date) >= shares
+
+    def consume(self, date: pd.Timestamp, shares: int) -> int:
+        if shares <= 0:
+            return 0
+        trade_day = self._normalize_day(date)
+        allowed = min(int(shares), self.available(date))
+        if allowed <= 0:
+            return 0
+        remaining = allowed
+        updated: List[Tuple[pd.Timestamp, int]] = []
+        for lot_day, lot_shares in self._lots:
+            if trade_day > lot_day and remaining > 0:
+                if lot_shares <= remaining:
+                    remaining -= lot_shares
+                    continue
+                updated.append((lot_day, lot_shares - remaining))
+                remaining = 0
+            else:
+                updated.append((lot_day, lot_shares))
+        self._lots = updated
+        return allowed
+
+    def reset(self) -> None:
+        self._lots.clear()
+
+    def force_clear(self) -> None:
+        self._lots.clear()
+
 def _calc_stats(equity: pd.Series, trades: List[Trade]) -> BacktestResult:
     initial_capital = float(equity.iloc[0])
     total_return = equity.iloc[-1] / initial_capital - 1.0
@@ -114,6 +167,9 @@ def backtest_fixed_period(
     entry_idx: Optional[int] = None
     trades: List[Trade] = []
     equity = pd.Series(index=idx, dtype=float)
+    t1_guard = TPlusOneGuard()
+    pending_exit = False
+    pending_exit_reason = ""
 
     for i, date in enumerate(idx):
         price = float(close.iloc[i])
@@ -127,57 +183,75 @@ def backtest_fixed_period(
                 cash -= cost + fee
                 entry_price = price
                 entry_idx = i
+                t1_guard.add(date, position)
+                pending_exit = False
+                pending_exit_reason = ""
         else:
-            should_exit = False
+            should_exit = pending_exit
+            reason = pending_exit_reason
             if entry_idx is not None:
                 days_hold = (date - idx[entry_idx]).days
-                if days_hold >= hold_days:
+                if not should_exit and days_hold >= hold_days:
                     should_exit = True
-            if sell.iloc[i]:
+                    reason = f"固定{hold_days}天"
+            if not should_exit and sell.iloc[i]:
                 should_exit = True
+                reason = "卖出信号"
 
             if should_exit and entry_idx is not None:
-                value = position * price
-                fee = value * fee_rate
-                cash += value - fee
-                ret = (price - entry_price) / entry_price
-                days_hold = (date - idx[entry_idx]).days
-                trades.append(
-                    Trade(
-                        entry_date=idx[entry_idx],
-                        exit_date=date,
-                        entry_price=entry_price,
-                        exit_price=price,
-                        return_pct=float(ret),
-                        holding_days=int(days_hold),
-                        note=f"固定{hold_days}天",
+                if not t1_guard.can_sell(date, position):
+                    pending_exit = True
+                    pending_exit_reason = reason or "卖出信号"
+                else:
+                    t1_guard.consume(date, position)
+                    value = position * price
+                    fee = value * fee_rate
+                    cash += value - fee
+                    ret = (price - entry_price) / entry_price
+                    days_hold = (date - idx[entry_idx]).days
+                    trades.append(
+                        Trade(
+                            entry_date=idx[entry_idx],
+                            exit_date=date,
+                            entry_price=entry_price,
+                            exit_price=price,
+                            return_pct=float(ret),
+                            holding_days=int(days_hold),
+                            note=reason or f"固定{hold_days}天",
+                        )
                     )
-                )
-                position = 0
-                entry_price = 0.0
-                entry_idx = None
+                    position = 0
+                    entry_price = 0.0
+                    entry_idx = None
+                    pending_exit = False
+                    pending_exit_reason = ""
 
         equity.iloc[i] = cash + position * price
 
     if position > 0 and entry_idx is not None:
         price = float(close.iloc[-1])
-        value = position * price
-        fee = value * fee_rate
-        cash += value - fee
-        ret = (price - entry_price) / entry_price
-        days_hold = (idx[-1] - idx[entry_idx]).days
-        trades.append(
-            Trade(
-                entry_date=idx[entry_idx],
-                exit_date=idx[-1],
-                entry_price=entry_price,
-                exit_price=price,
-                return_pct=float(ret),
-                holding_days=int(days_hold),
-                note=f"到样本末尾强平(固定{hold_days}天)",
+        exit_date = idx[-1]
+        if t1_guard.can_sell(exit_date, position):
+            t1_guard.consume(exit_date, position)
+            value = position * price
+            fee = value * fee_rate
+            cash += value - fee
+            ret = (price - entry_price) / entry_price
+            days_hold = (exit_date - idx[entry_idx]).days
+            trades.append(
+                Trade(
+                    entry_date=idx[entry_idx],
+                    exit_date=exit_date,
+                    entry_price=entry_price,
+                    exit_price=price,
+                    return_pct=float(ret),
+                    holding_days=int(days_hold),
+                    note=f"到样本末尾强平(固定{hold_days}天)",
+                )
             )
-        )
-        equity.iloc[-1] = cash
+            equity.iloc[-1] = cash
+        else:
+            equity.iloc[-1] = cash + position * price
 
     return _calc_stats(equity, trades)
 
@@ -204,6 +278,9 @@ def backtest_take_profit_stop_loss(
     entry_idx: Optional[int] = None
     trades: List[Trade] = []
     equity = pd.Series(index=idx, dtype=float)
+    t1_guard = TPlusOneGuard()
+    pending_exit = False
+    pending_exit_reason = ""
 
     for i, date in enumerate(idx):
         price = float(close.iloc[i])
@@ -217,64 +294,78 @@ def backtest_take_profit_stop_loss(
                 cash -= cost + fee
                 entry_price = price
                 entry_idx = i
+                t1_guard.add(date, position)
+                pending_exit = False
+                pending_exit_reason = ""
         else:
             assert entry_idx is not None
             ret = (price - entry_price) / entry_price
-            should_exit = False
-            reason = ""
+            should_exit = pending_exit
+            reason = pending_exit_reason
 
-            if ret >= tp:
+            if not should_exit and ret >= tp:
                 should_exit = True
                 reason = "止盈"
-            if ret <= -sl:
+            if not should_exit and ret <= -sl:
                 should_exit = True
                 reason = "止损"
-            if sell.iloc[i]:
+            if not should_exit and sell.iloc[i]:
                 should_exit = True
-                if not reason:
-                    reason = "卖出信号"
+                reason = reason or "卖出信号"
 
             if should_exit:
-                value = position * price
-                fee = value * fee_rate
-                cash += value - fee
-                days_hold = (date - idx[entry_idx]).days
-                trades.append(
-                    Trade(
-                        entry_date=idx[entry_idx],
-                        exit_date=date,
-                        entry_price=entry_price,
-                        exit_price=price,
-                        return_pct=float(ret),
-                        holding_days=int(days_hold),
-                        note=reason,
+                if not t1_guard.can_sell(date, position):
+                    pending_exit = True
+                    pending_exit_reason = reason or "卖出信号"
+                else:
+                    t1_guard.consume(date, position)
+                    value = position * price
+                    fee = value * fee_rate
+                    cash += value - fee
+                    days_hold = (date - idx[entry_idx]).days
+                    trades.append(
+                        Trade(
+                            entry_date=idx[entry_idx],
+                            exit_date=date,
+                            entry_price=entry_price,
+                            exit_price=price,
+                            return_pct=float(ret),
+                            holding_days=int(days_hold),
+                            note=reason or "卖出信号",
+                        )
                     )
-                )
-                position = 0
-                entry_price = 0.0
-                entry_idx = None
+                    position = 0
+                    entry_price = 0.0
+                    entry_idx = None
+                    pending_exit = False
+                    pending_exit_reason = ""
 
         equity.iloc[i] = cash + position * price
 
     if position > 0 and entry_idx is not None:
         price = float(close.iloc[-1])
-        value = position * price
-        fee = value * fee_rate
-        cash += value - fee
-        ret = (price - entry_price) / entry_price
-        days_hold = (idx[-1] - idx[entry_idx]).days
-        trades.append(
-            Trade(
-                entry_date=idx[entry_idx],
-                exit_date=idx[-1],
-                entry_price=entry_price,
-                exit_price=price,
-                return_pct=float(ret),
-                holding_days=int(days_hold),
-                note="样本末尾强平(止盈止损)",
+        exit_date = idx[-1]
+        if t1_guard.can_sell(exit_date, position):
+            t1_guard.consume(exit_date, position)
+            value = position * price
+            fee = value * fee_rate
+            cash += value - fee
+            ret = (price - entry_price) / entry_price
+            days_hold = (exit_date - idx[entry_idx]).days
+            trades.append(
+                Trade(
+                    entry_date=idx[entry_idx],
+                    exit_date=exit_date,
+                    entry_price=entry_price,
+                    exit_price=price,
+                    return_pct=float(ret),
+                    holding_days=int(days_hold),
+                    note="样本末尾强平(止盈止损)",
+                )
             )
-        )
-        equity.iloc[-1] = cash
+            equity.iloc[-1] = cash
+        else:
+            equity.iloc[-1] = cash + position * price
 
     return _calc_stats(equity, trades)
 
@@ -375,6 +466,9 @@ def backtest_dynamic_capital(
     max_investment_used = 0.0
     hedge_max_loss_streak_used = 0
     hedge_max_investment_used = 0.0
+    t1_guard = TPlusOneGuard()
+    pending_exit = False
+    pending_exit_reason = ""
 
     def clamp_amount(value: float) -> float:
         if max_limit > 0:
@@ -487,21 +581,123 @@ def backtest_dynamic_capital(
                                 "hedgeQuantity": hedge_entry_shares,
                             }
                         )
+                        t1_guard.add(date, shares)
+                        pending_exit = False
+                        pending_exit_reason = ""
 
-        elif position > 0 and sell.iloc[i]:
-            exit_price = price
-            value = position * exit_price
+        elif position > 0:
+            should_exit = pending_exit or sell.iloc[i]
+            if should_exit:
+                if not t1_guard.can_sell(date, position):
+                    pending_exit = True
+                    pending_exit_reason = "卖出信号"
+                else:
+                    t1_guard.consume(date, position)
+                    exit_price = price
+                    value = position * exit_price
+                    exit_fee = value * fee_rate
+                    cash_main += value - exit_fee
+                    pnl = value - exit_fee - entry_cost - entry_fee
+                    days_hold = (date - idx[entry_idx]).days if entry_idx is not None else 0
+                    hedge_realized_pnl = None
+                    hedge_record_amount = hedge_entry_amount or 0.0
+                    hedge_record_loss_state = hedge_entry_loss_state
+                    hedge_record_quantity = hedge_entry_shares
+
+                    if hedge_enabled and hedge_position > 0:
+                        cover_cost = hedge_position * exit_price
+                        cover_fee = cover_cost * fee_rate
+                        hedge_cash -= cover_cost + cover_fee
+                        hedge_pnl = hedge_cash
+                        hedge_realized_pnl = float(hedge_pnl)
+                        cash_main += hedge_cash
+                        hedge_cash = 0.0
+                        hedge_position = 0
+                        if hedge_pnl >= 0:
+                            hedge_loss_streak = 0
+                            pending_loss_steps_hedge = 0
+                            next_amount_hedge = clamp_amount(hedge_initial if reset_on_win else last_allocation_hedge)
+                        else:
+                            hedge_loss_streak += 1
+                            hedge_max_loss_streak_used = max(hedge_max_loss_streak_used, hedge_loss_streak)
+                            hedge_steps = allowed_steps(hedge_loss_streak, hedge_max_steps)
+                            if force_stop:
+                                pending_loss_steps_hedge = 0
+                                next_amount_hedge = clamp_amount(hedge_initial)
+                            else:
+                                pending_loss_steps_hedge = hedge_steps
+                                next_amount_hedge = clamp_amount(hedge_initial)
+                        hedge_entry_shares = 0
+                        hedge_entry_amount = 0.0
+                        hedge_entry_loss_state = 0
+
+                    trades.append(
+                        Trade(
+                            entry_date=idx[entry_idx] if entry_idx is not None else date,
+                            exit_date=date,
+                            entry_price=float(entry_price),
+                            exit_price=float(exit_price),
+                            return_pct=float((exit_price - entry_price) / entry_price) if entry_price else 0.0,
+                            holding_days=int(days_hold),
+                            note="动态资金管理",
+                            investment_amount=entry_investment_amount if entry_investment_amount else None,
+                            loss_streak=int(entry_loss_state),
+                            adjusted_quantity=int(entry_shares) if entry_shares else None,
+                            pnl_with_dynamic_fund=float(pnl),
+                            hedge_investment_amount=hedge_record_amount or None,
+                            hedge_loss_streak=int(hedge_record_loss_state) if hedge_record_amount else None,
+                            hedge_adjusted_quantity=int(hedge_record_quantity) if hedge_record_quantity else None,
+                            hedge_pnl_with_dynamic_fund=hedge_realized_pnl,
+                        )
+                    )
+                    position = 0
+                    entry_idx = None
+                    entry_shares = 0
+                    entry_investment_amount = 0.0
+                    entry_loss_state = 0
+                    pending_exit = False
+                    pending_exit_reason = ""
+
+                    if pnl >= 0:
+                        loss_streak = 0
+                        pending_loss_steps_main = 0
+                        next_amount_main = clamp_amount(initial_investment if reset_on_win else last_allocation_main)
+                    else:
+                        loss_streak += 1
+                        max_loss_streak_used = max(max_loss_streak_used, loss_streak)
+                        steps = allowed_steps(loss_streak, max_add_steps)
+                        if force_stop:
+                            pending_loss_steps_main = 0
+                            next_amount_main = clamp_amount(initial_investment)
+                        else:
+                            pending_loss_steps_main = steps
+                            next_amount_main = clamp_amount(initial_investment)
+
+        equity_value = cash_main + position * price + hedge_cash - hedge_position * price
+        equity.iloc[i] = equity_value
+        if equity_value > peak_equity:
+            peak_equity = equity_value
+        drawdown_value = peak_equity - equity_value
+        if drawdown_limit_value is not None and drawdown_value >= drawdown_limit_value:
+            force_stop = True
+
+    if position > 0 and entry_idx is not None:
+        price = float(close.iloc[-1])
+        exit_date = idx[-1]
+        if t1_guard.can_sell(exit_date, position):
+            t1_guard.consume(exit_date, position)
+            value = position * price
             exit_fee = value * fee_rate
             cash_main += value - exit_fee
+            days_hold = (exit_date - idx[entry_idx]).days
             pnl = value - exit_fee - entry_cost - entry_fee
-            days_hold = (date - idx[entry_idx]).days if entry_idx is not None else 0
             hedge_realized_pnl = None
             hedge_record_amount = hedge_entry_amount or 0.0
             hedge_record_loss_state = hedge_entry_loss_state
             hedge_record_quantity = hedge_entry_shares
 
             if hedge_enabled and hedge_position > 0:
-                cover_cost = hedge_position * exit_price
+                cover_cost = hedge_position * price
                 cover_fee = cover_cost * fee_rate
                 hedge_cash -= cover_cost + cover_fee
                 hedge_pnl = hedge_cash
@@ -511,31 +707,22 @@ def backtest_dynamic_capital(
                 hedge_position = 0
                 if hedge_pnl >= 0:
                     hedge_loss_streak = 0
-                    pending_loss_steps_hedge = 0
-                    next_amount_hedge = clamp_amount(hedge_initial if reset_on_win else last_allocation_hedge)
                 else:
                     hedge_loss_streak += 1
                     hedge_max_loss_streak_used = max(hedge_max_loss_streak_used, hedge_loss_streak)
-                    hedge_steps = allowed_steps(hedge_loss_streak, hedge_max_steps)
-                    if force_stop:
-                        pending_loss_steps_hedge = 0
-                        next_amount_hedge = clamp_amount(hedge_initial)
-                    else:
-                        pending_loss_steps_hedge = hedge_steps
-                        next_amount_hedge = clamp_amount(hedge_initial)
                 hedge_entry_shares = 0
                 hedge_entry_amount = 0.0
                 hedge_entry_loss_state = 0
 
             trades.append(
                 Trade(
-                    entry_date=idx[entry_idx] if entry_idx is not None else date,
-                    exit_date=date,
+                    entry_date=idx[entry_idx],
+                    exit_date=exit_date,
                     entry_price=float(entry_price),
-                    exit_price=float(exit_price),
-                    return_pct=float((exit_price - entry_price) / entry_price) if entry_price else 0.0,
+                    exit_price=float(price),
+                    return_pct=float((price - entry_price) / entry_price) if entry_price else 0.0,
                     holding_days=int(days_hold),
-                    note="动态资金管理",
+                    note="动态资金管理-样本结束强平",
                     investment_amount=entry_investment_amount if entry_investment_amount else None,
                     loss_streak=int(entry_loss_state),
                     adjusted_quantity=int(entry_shares) if entry_shares else None,
@@ -551,91 +738,18 @@ def backtest_dynamic_capital(
             entry_shares = 0
             entry_investment_amount = 0.0
             entry_loss_state = 0
-
+            pending_exit = False
+            pending_exit_reason = ""
             if pnl >= 0:
                 loss_streak = 0
-                pending_loss_steps_main = 0
-                next_amount_main = clamp_amount(initial_investment if reset_on_win else last_allocation_main)
             else:
                 loss_streak += 1
                 max_loss_streak_used = max(max_loss_streak_used, loss_streak)
-                steps = allowed_steps(loss_streak, max_add_steps)
-                if force_stop:
-                    pending_loss_steps_main = 0
-                    next_amount_main = clamp_amount(initial_investment)
-                else:
-                    pending_loss_steps_main = steps
-                    next_amount_main = clamp_amount(initial_investment)
-
-        equity_value = cash_main + position * price + hedge_cash - hedge_position * price
-        equity.iloc[i] = equity_value
-        if equity_value > peak_equity:
-            peak_equity = equity_value
-        drawdown_value = peak_equity - equity_value
-        if drawdown_limit_value is not None and drawdown_value >= drawdown_limit_value:
-            force_stop = True
-
-    if position > 0 and entry_idx is not None:
-        price = float(close.iloc[-1])
-        value = position * price
-        exit_fee = value * fee_rate
-        cash_main += value - exit_fee
-        days_hold = (idx[-1] - idx[entry_idx]).days
-        pnl = value - exit_fee - entry_cost - entry_fee
-        hedge_realized_pnl = None
-        hedge_record_amount = hedge_entry_amount or 0.0
-        hedge_record_loss_state = hedge_entry_loss_state
-        hedge_record_quantity = hedge_entry_shares
-
-        if hedge_enabled and hedge_position > 0:
-            cover_cost = hedge_position * price
-            cover_fee = cover_cost * fee_rate
-            hedge_cash -= cover_cost + cover_fee
-            hedge_pnl = hedge_cash
-            hedge_realized_pnl = float(hedge_pnl)
-            cash_main += hedge_cash
-            hedge_cash = 0.0
-            hedge_position = 0
-            if hedge_pnl >= 0:
-                hedge_loss_streak = 0
-            else:
-                hedge_loss_streak += 1
-                hedge_max_loss_streak_used = max(hedge_max_loss_streak_used, hedge_loss_streak)
-            hedge_entry_shares = 0
-            hedge_entry_amount = 0.0
-            hedge_entry_loss_state = 0
-
-        trades.append(
-            Trade(
-                entry_date=idx[entry_idx],
-                exit_date=idx[-1],
-                entry_price=float(entry_price),
-                exit_price=float(price),
-                return_pct=float((price - entry_price) / entry_price) if entry_price else 0.0,
-                holding_days=int(days_hold),
-                note="动态资金管理-样本结束强平",
-                investment_amount=entry_investment_amount if entry_investment_amount else None,
-                loss_streak=int(entry_loss_state),
-                adjusted_quantity=int(entry_shares) if entry_shares else None,
-                pnl_with_dynamic_fund=float(pnl),
-                hedge_investment_amount=hedge_record_amount or None,
-                hedge_loss_streak=int(hedge_record_loss_state) if hedge_record_amount else None,
-                hedge_adjusted_quantity=int(hedge_record_quantity) if hedge_record_quantity else None,
-                hedge_pnl_with_dynamic_fund=hedge_realized_pnl,
-            )
-        )
-        position = 0
-        entry_idx = None
-        entry_shares = 0
-        entry_investment_amount = 0.0
-        entry_loss_state = 0
-        if pnl >= 0:
-            loss_streak = 0
         else:
-            loss_streak += 1
-            max_loss_streak_used = max(max_loss_streak_used, loss_streak)
+            pending_exit = True
+            pending_exit_reason = "样本结束未满足T+1"
 
-    if hedge_enabled and hedge_position > 0:
+    if hedge_enabled and hedge_position > 0 and position == 0:
         price = float(close.iloc[-1])
         cover_cost = hedge_position * price
         cover_fee = cover_cost * fee_rate
@@ -644,7 +758,8 @@ def backtest_dynamic_capital(
         hedge_cash = 0.0
         hedge_position = 0
 
-    equity.iloc[-1] = cash_main
+    final_price = float(close.iloc[-1])
+    equity.iloc[-1] = cash_main + position * final_price + hedge_cash - hedge_position * final_price
 
     result = _calc_stats(equity, trades)
     result.dynamic_equity_curve = equity
@@ -766,6 +881,9 @@ def backtest_buy_hedge(
     skipped_by_cash = 0
     skipped_by_limit = 0
     skipped_by_rule = 0
+    t1_guard = TPlusOneGuard()
+    pending_exit = False
+    pending_exit_reason = ""
 
     def compute_trigger_price() -> Optional[float]:
         if position <= 0 or step_pct <= 0 or entry_price0 <= 0:
@@ -812,55 +930,63 @@ def backtest_buy_hedge(
 
         added_this_bar = False
 
-        if position > 0 and sell.iloc[i]:
-            exit_price = price
-            value = position * exit_price
-            exit_fee = value * fee_rate
-            cash += value - exit_fee
-            avg_cost = position_cost / position if position > 0 else 0.0
-            pnl = value - exit_fee - position_cost
-            entry_date = idx[entry_idx] if entry_idx is not None else date
-            days_hold = (date - entry_date).days if entry_idx is not None else 0
-            trades.append(
-                Trade(
-                    entry_date=entry_date,
-                    exit_date=date,
-                    entry_price=float(entry_price0),
-                    exit_price=float(exit_price),
-                    return_pct=float((exit_price - entry_price0) / entry_price0) if entry_price0 else 0.0,
-                    holding_days=int(days_hold),
-                    note="买入对冲",
+        should_exit = position > 0 and (pending_exit or sell.iloc[i])
+        if should_exit:
+            if not t1_guard.can_sell(date, position):
+                pending_exit = True
+                pending_exit_reason = pending_exit_reason or "卖出信号"
+            else:
+                t1_guard.consume(date, position)
+                exit_price = price
+                value = position * exit_price
+                exit_fee = value * fee_rate
+                cash += value - exit_fee
+                avg_cost = position_cost / position if position > 0 else 0.0
+                pnl = value - exit_fee - position_cost
+                entry_date = idx[entry_idx] if entry_idx is not None else date
+                days_hold = (date - entry_date).days if entry_idx is not None else 0
+                trades.append(
+                    Trade(
+                        entry_date=entry_date,
+                        exit_date=date,
+                        entry_price=float(entry_price0),
+                        exit_price=float(exit_price),
+                        return_pct=float((exit_price - entry_price0) / entry_price0) if entry_price0 else 0.0,
+                        holding_days=int(days_hold),
+                        note="买入对冲",
+                    )
                 )
-            )
-            cost_reduction = ((entry_price0 - avg_cost) / entry_price0) if entry_price0 else 0.0
-            buy_hedge_trades.append(
-                {
-                    "trade_id": current_trade_id or trade_count + 1,
-                    "entry_date": str(entry_date),
-                    "exit_date": str(date),
-                    "entry_price": float(entry_price0),
-                    "exit_price": float(exit_price),
-                    "avg_cost": float(avg_cost),
-                    "total_shares": shares_to_hands(int(position)),
-                    "adds": int(add_count),
-                    "capital_used": float(position_cost),
-                    "pnl": float(pnl),
-                    "return_pct": float(pnl / position_cost) if position_cost else 0.0,
-                    "avg_cost_delta_pct": float(cost_reduction),
-                }
-            )
-            max_layers = max(max_layers, add_count)
-            trade_add_records.append(add_count)
-            trade_count += 1
-            avg_cost_reduction_sum += float(cost_reduction)
-            position = 0
-            position_cost = 0.0
-            entry_idx = None
-            entry_price0 = 0.0
-            last_add_price = 0.0
-            add_count = 0
-            current_trade_id = 0
-            can_add_more = True
+                cost_reduction = ((entry_price0 - avg_cost) / entry_price0) if entry_price0 else 0.0
+                buy_hedge_trades.append(
+                    {
+                        "trade_id": current_trade_id or trade_count + 1,
+                        "entry_date": str(entry_date),
+                        "exit_date": str(date),
+                        "entry_price": float(entry_price0),
+                        "exit_price": float(exit_price),
+                        "avg_cost": float(avg_cost),
+                        "total_shares": shares_to_hands(int(position)),
+                        "adds": int(add_count),
+                        "capital_used": float(position_cost),
+                        "pnl": float(pnl),
+                        "return_pct": float(pnl / position_cost) if position_cost else 0.0,
+                        "avg_cost_delta_pct": float(cost_reduction),
+                    }
+                )
+                max_layers = max(max_layers, add_count)
+                trade_add_records.append(add_count)
+                trade_count += 1
+                avg_cost_reduction_sum += float(cost_reduction)
+                position = 0
+                position_cost = 0.0
+                entry_idx = None
+                entry_price0 = 0.0
+                last_add_price = 0.0
+                add_count = 0
+                current_trade_id = 0
+                can_add_more = True
+                pending_exit = False
+                pending_exit_reason = ""
 
         if position == 0 and buy.iloc[i] and start_position_shares > 0:
             desired = start_position_shares
@@ -895,8 +1021,11 @@ def backtest_buy_hedge(
                     }
                 )
                 max_capital_used = max(max_capital_used, position_cost)
+                t1_guard.add(date, shares)
+                pending_exit = False
+                pending_exit_reason = ""
 
-        elif position > 0 and step_pct > 0 and not added_this_bar and can_add_more:
+        elif position > 0 and step_pct > 0 and not added_this_bar and can_add_more and not pending_exit:
             trigger_price = compute_trigger_price()
             if trigger_price is not None and price <= trigger_price:
                 if max_adds > 0 and add_count >= max_adds:
@@ -992,6 +1121,7 @@ def backtest_buy_hedge(
                                 }
                             )
                             max_capital_used = max(max_capital_used, position_cost)
+                            t1_guard.add(date, shares)
                             if max_adds > 0 and add_count >= max_adds:
                                 can_add_more = False
 
@@ -1000,48 +1130,55 @@ def backtest_buy_hedge(
     if position > 0 and entry_idx is not None:
         date = idx[-1]
         price = float(close.iloc[-1])
-        value = position * price
-        exit_fee = value * fee_rate
-        cash += value - exit_fee
-        avg_cost = position_cost / position if position > 0 else 0.0
-        entry_date = idx[entry_idx]
-        days_hold = (date - entry_date).days
-        trades.append(
-            Trade(
-                entry_date=entry_date,
-                exit_date=date,
-                entry_price=float(entry_price0),
-                exit_price=float(price),
-                return_pct=float((price - entry_price0) / entry_price0) if entry_price0 else 0.0,
-                holding_days=int(days_hold),
-                note="买入对冲-样本结束强平",
+        if t1_guard.can_sell(date, position):
+            t1_guard.consume(date, position)
+            value = position * price
+            exit_fee = value * fee_rate
+            cash += value - exit_fee
+            avg_cost = position_cost / position if position > 0 else 0.0
+            entry_date = idx[entry_idx]
+            days_hold = (date - entry_date).days
+            trades.append(
+                Trade(
+                    entry_date=entry_date,
+                    exit_date=date,
+                    entry_price=float(entry_price0),
+                    exit_price=float(price),
+                    return_pct=float((price - entry_price0) / entry_price0) if entry_price0 else 0.0,
+                    holding_days=int(days_hold),
+                    note="买入对冲-样本结束强平",
+                )
             )
-        )
-        pnl = value - exit_fee - position_cost
-        cost_reduction = ((entry_price0 - avg_cost) / entry_price0) if entry_price0 else 0.0
-        buy_hedge_trades.append(
-            {
-                "trade_id": current_trade_id or trade_count + 1,
-                "entry_date": str(entry_date),
-                "exit_date": str(date),
-                "entry_price": float(entry_price0),
-                "exit_price": float(price),
-                "avg_cost": float(avg_cost),
-                "total_shares": shares_to_hands(int(position)),
-                "adds": int(add_count),
-                "capital_used": float(position_cost),
-                "pnl": float(pnl),
-                "return_pct": float(pnl / position_cost) if position_cost else 0.0,
-                "avg_cost_delta_pct": float(cost_reduction),
-            }
-        )
-        max_layers = max(max_layers, add_count)
-        trade_add_records.append(add_count)
-        trade_count += 1
-        avg_cost_reduction_sum += float(cost_reduction)
-        equity.iloc[-1] = cash
+            pnl = value - exit_fee - position_cost
+            cost_reduction = ((entry_price0 - avg_cost) / entry_price0) if entry_price0 else 0.0
+            buy_hedge_trades.append(
+                {
+                    "trade_id": current_trade_id or trade_count + 1,
+                    "entry_date": str(entry_date),
+                    "exit_date": str(date),
+                    "entry_price": float(entry_price0),
+                    "exit_price": float(price),
+                    "avg_cost": float(avg_cost),
+                    "total_shares": shares_to_hands(int(position)),
+                    "adds": int(add_count),
+                    "capital_used": float(position_cost),
+                    "pnl": float(pnl),
+                    "return_pct": float(pnl / position_cost) if position_cost else 0.0,
+                    "avg_cost_delta_pct": float(cost_reduction),
+                }
+            )
+            max_layers = max(max_layers, add_count)
+            trade_add_records.append(add_count)
+            trade_count += 1
+            avg_cost_reduction_sum += float(cost_reduction)
+            pending_exit = False
+            pending_exit_reason = ""
+        else:
+            pending_exit = True
+            pending_exit_reason = "样本结束未满足T+1"
 
-    equity.iloc[-1] = cash
+    final_price = float(close.iloc[-1]) if len(close) else 0.0
+    equity.iloc[-1] = cash + position * final_price
     result = _calc_stats(equity, trades)
 
     total_adds = sum(trade_add_records)
@@ -1095,6 +1232,9 @@ def backtest_dca_simple(
     position = 0
     trades: List[Trade] = []
     equity = pd.Series(index=idx, dtype=float)
+    t1_guard = TPlusOneGuard()
+    pending_exit = False
+    pending_exit_reason = ""
 
     first_buy_date: Optional[pd.Timestamp] = None
     first_buy_price: float = 0.0
@@ -1110,13 +1250,53 @@ def backtest_dca_simple(
                 fee = cost * fee_rate
                 cash -= cost + fee
                 position += shares
+                t1_guard.add(date, shares)
                 if first_buy_date is None:
                     first_buy_date = date
                     first_buy_price = price
 
         equity.iloc[i] = cash + position * price
 
-        if equity.iloc[i] >= initial_capital * (1 + target_return) and position > 0:
+        target_reached = equity.iloc[i] >= initial_capital * (1 + target_return) and position > 0
+        should_exit = position > 0 and (pending_exit or target_reached)
+        exit_note = pending_exit_reason or "达到目标收益率，全部卖出"
+        if should_exit:
+            if not t1_guard.can_sell(date, position):
+                pending_exit = True
+                pending_exit_reason = exit_note
+            else:
+                t1_guard.consume(date, position)
+                value = position * price
+                fee = value * fee_rate
+                cash += value - fee
+                ret = cash / initial_capital - 1.0
+                if first_buy_date is None:
+                    first_buy_date = idx[0]
+                    first_buy_price = float(close.iloc[0])
+                days_hold = (date - first_buy_date).days
+                trades.append(
+                    Trade(
+                        entry_date=first_buy_date,
+                        exit_date=date,
+                        entry_price=first_buy_price,
+                        exit_price=price,
+                        return_pct=float(ret),
+                        holding_days=int(days_hold),
+                        note=exit_note,
+                    )
+                )
+                position = 0
+                first_buy_date = None
+                first_buy_price = 0.0
+                pending_exit = False
+                pending_exit_reason = ""
+                equity.iloc[i] = cash
+
+    if position > 0:
+        price = float(close.iloc[-1])
+        exit_date = idx[-1]
+        if t1_guard.can_sell(exit_date, position):
+            t1_guard.consume(exit_date, position)
             value = position * price
             fee = value * fee_rate
             cash += value - fee
@@ -1124,45 +1304,29 @@ def backtest_dca_simple(
             if first_buy_date is None:
                 first_buy_date = idx[0]
                 first_buy_price = float(close.iloc[0])
-            days_hold = (date - first_buy_date).days
+            days_hold = (exit_date - first_buy_date).days
             trades.append(
                 Trade(
                     entry_date=first_buy_date,
-                    exit_date=date,
+                    exit_date=exit_date,
                     entry_price=first_buy_price,
                     exit_price=price,
                     return_pct=float(ret),
                     holding_days=int(days_hold),
-                    note="达到目标收益率，全部卖出",
+                    note="样本末尾全部卖出(定投)",
                 )
             )
             position = 0
             first_buy_date = None
             first_buy_price = 0.0
-            equity.iloc[i] = cash
+            pending_exit = False
+            pending_exit_reason = ""
+        else:
+            pending_exit = True
+            pending_exit_reason = pending_exit_reason or "样本结束未满足T+1"
 
-    if position > 0:
-        price = float(close.iloc[-1])
-        value = position * price
-        fee = value * fee_rate
-        cash += value - fee
-        ret = cash / initial_capital - 1.0
-        if first_buy_date is None:
-            first_buy_date = idx[0]
-            first_buy_price = float(close.iloc[0])
-        days_hold = (idx[-1] - first_buy_date).days
-        trades.append(
-            Trade(
-                entry_date=first_buy_date,
-                exit_date=idx[-1],
-                entry_price=first_buy_price,
-                exit_price=price,
-                return_pct=float(ret),
-                holding_days=int(days_hold),
-                note="样本末尾全部卖出(定投)",
-            )
-        )
-        equity.iloc[-1] = cash
+    final_price = float(close.iloc[-1]) if len(close) else 0.0
+    equity.iloc[-1] = cash + position * final_price
 
     return _calc_stats(equity, trades)
 
@@ -1191,6 +1355,7 @@ def backtest_grid_simple(
 
     trades: List[Trade] = []
     equity = pd.Series(index=idx, dtype=float)
+    t1_guard = TPlusOneGuard()
 
     for i, date in enumerate(idx):
         price = float(close.iloc[i])
@@ -1214,18 +1379,23 @@ def backtest_grid_simple(
                     last_trade_price = price
                     grids_opened += 1
                     trade_note = "网格买入"
+                    t1_guard.add(date, shares)
 
         elif price >= up_threshold and position > 0:
             shares = int(single_grid_cash // price)
             if shares <= 0:
                 shares = position
             shares = min(shares, position)
-            value = shares * price
-            fee = value * fee_rate
-            cash += value - fee
-            position -= shares
-            last_trade_price = price
-            trade_note = "网格卖出"
+            sellable = t1_guard.consume(date, shares)
+            if sellable > 0:
+                value = sellable * price
+                fee = value * fee_rate
+                cash += value - fee
+                position -= sellable
+                last_trade_price = price
+                trade_note = "网格卖出"
+            else:
+                trade_note = ""
 
         if trade_note:
             trades.append(
