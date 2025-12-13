@@ -440,6 +440,76 @@ label {
   box-shadow: 0 12px 30px rgba(var(--overlay-rgb), 0.35);
 }
 
+.ai-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ai-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1;
+}
+
+.ai-toggle--active span {
+  color: var(--accent);
+}
+
+.ai-toggle span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+}
+
+.ai-switch {
+  position: relative;
+  width: 46px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  transform: translateY(4px);
+}
+
+.ai-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.ai-slider {
+  position: absolute;
+  inset: 0;
+  background: var(--border);
+  border-radius: 999px;
+  transition: background 0.2s ease;
+}
+
+.ai-slider::before {
+  content: '';
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  left: 2px;
+  top: 2px;
+  background: #fff;
+  border-radius: 999px;
+  transition: transform 0.2s ease, width 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.ai-switch input:checked + .ai-slider {
+  background: var(--accent);
+}
+
+.ai-switch input:checked + .ai-slider::before {
+  transform: translateX(20px);
+}
+
 .ai-card::after {
   content: '';
   position: absolute;
@@ -460,11 +530,18 @@ label {
   padding-top: 6px;
 }
 
+.ai-disabled-message {
+  text-align: center;
+  padding: 28px 0;
+  color: var(--text-secondary);
+}
+
 .ai-loading,
 .ai-error,
 .ai-empty {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
   min-height: 80px;
   color: var(--text-secondary);

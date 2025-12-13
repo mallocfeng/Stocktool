@@ -34,6 +34,7 @@ let aiHoverTimer = null;
 const overlayBlocking = ref(false);
 const overlayMessage = ref({ title: '', detail: '' });
 let aiTicket = 0;
+const aiEnabled = ref(false);
 const themeMode = ref('auto');
 const systemPrefersDark = ref(true);
 const themeOptions = [
@@ -120,6 +121,7 @@ const handleDatasetSignature = (data) => {
   const signature = computeDatasetSignature(data);
   datasetSignature.value = signature;
   if (!signature) return;
+  if (!aiEnabled.value) return;
   if (signature !== cachedSignature.value) {
     requestAIInsight();
   }
@@ -200,6 +202,20 @@ const handleOverlayUnblock = () => {
   overlayMessage.value = { title: '', detail: '' };
 };
 
+const handleAIToggle = () => {
+  aiEnabled.value = !aiEnabled.value;
+  if (!aiEnabled.value) {
+    aiResult.value = null;
+    aiError.value = '';
+    aiLoading.value = false;
+    datasetSignature.value = '';
+    cachedSignature.value = '';
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(AI_STORAGE_KEY);
+    }
+  }
+};
+
 const handleRun = async (configPayload) => {
   if (!configPayload || !configPayload.payload) return;
   const { payload, meta } = configPayload;
@@ -260,6 +276,10 @@ const handleSelectStrategy = (entry) => {
 };
 
 const requestAIInsight = async (force = false) => {
+  if (!aiEnabled.value) {
+    aiError.value = '';
+    return;
+  }
   if (!hasData.value) {
     aiError.value = '请先加载行情数据并运行回测';
     return;
@@ -278,11 +298,11 @@ const requestAIInsight = async (force = false) => {
     const res = await axios.post('/analytics/ai_insight', {
       asset_label: lastConfigMeta.value.assetLabel || '',
     });
-    if (currentTicket !== aiTicket) return;
+    if (currentTicket !== aiTicket || !aiEnabled.value) return;
     aiResult.value = res.data;
     persistAIInsight(datasetSignature.value, res.data);
   } catch (e) {
-    if (currentTicket !== aiTicket) return;
+    if (currentTicket !== aiTicket || !aiEnabled.value) return;
     aiError.value = e.response?.data?.detail || e.message;
   } finally {
     if (currentTicket === aiTicket) {
@@ -395,32 +415,46 @@ const handleAIMouseLeave = () => {
               <h3>当前股票趋势解读</h3>
               <p class="panel-subtitle">深度分析 + 未来走势预测</p>
             </div>
-            <button class="secondary" type="button" @click="requestAIInsight(true)" :disabled="aiLoading || !hasData">
-              {{ aiLoading ? '分析中…' : '重新分析' }}
-            </button>
+            <div class="ai-panel-actions">
+              <button class="secondary" type="button" @click="requestAIInsight(true)" :disabled="aiLoading || !hasData || !aiEnabled">
+                {{ aiLoading ? '分析中…' : '重新分析' }}
+              </button>
+              <div class="ai-toggle" :class="{ 'ai-toggle--active': aiEnabled }">
+                <label class="ai-switch" aria-label="切换 AI 趋势解读">
+                  <input type="checkbox" :checked="aiEnabled" @change="handleAIToggle" />
+                  <span class="ai-slider"></span>
+                </label>
+                <span>{{ aiEnabled ? 'AI 已启用' : 'AI 已关闭' }}</span>
+              </div>
+            </div>
           </div>
           <div class="ai-body">
-            <div v-if="!hasData" class="ai-empty">请先上传行情数据并运行一次回测</div>
-            <div v-else-if="aiLoading" class="ai-loading">
-              <span class="spinner" aria-hidden="true"></span>
-              正在分析当前股票，请稍等…
+            <div v-if="!aiEnabled" class="ai-disabled-message">
+              股票趋势解读为关闭状态，如需使用请打开卡片右上角开关。
             </div>
-            <div v-else-if="aiError" class="ai-error">AI 分析失败：{{ aiError }}</div>
-            <div v-else-if="aiResult?.analysis" class="ai-content">
-              <ul class="ai-stats" v-if="aiResult.stats">
-                <li>区间：{{ aiResult.stats.date_range }}</li>
-                <li>区间涨跌：{{ aiResult.stats.total_return_pct }}%</li>
-                <li>波动率：{{ aiResult.stats.volatility_pct }}%</li>
-                <li>平均成交量：{{ aiResult.stats.avg_volume }}</li>
-              </ul>
-              <div
-                class="ai-analysis-text markdown-body"
-                v-if="aiRenderedHtml"
-                v-html="aiRenderedHtml"
-              ></div>
-              <div v-else class="ai-empty">暂无分析内容</div>
-            </div>
-            <div v-else class="ai-empty">暂无分析结果</div>
+            <template v-else>
+              <div v-if="!hasData" class="ai-empty">请先上传行情数据并运行一次回测</div>
+              <div v-else-if="aiLoading" class="ai-loading">
+                <span class="spinner" aria-hidden="true"></span>
+                正在分析当前股票，请稍等…
+              </div>
+              <div v-else-if="aiError" class="ai-error">AI 分析失败：{{ aiError }}</div>
+              <div v-else-if="aiResult?.analysis" class="ai-content">
+                <ul class="ai-stats" v-if="aiResult.stats">
+                  <li>区间：{{ aiResult.stats.date_range }}</li>
+                  <li>区间涨跌：{{ aiResult.stats.total_return_pct }}%</li>
+                  <li>波动率：{{ aiResult.stats.volatility_pct }}%</li>
+                  <li>平均成交量：{{ aiResult.stats.avg_volume }}</li>
+                </ul>
+                <div
+                  class="ai-analysis-text markdown-body"
+                  v-if="aiRenderedHtml"
+                  v-html="aiRenderedHtml"
+                ></div>
+                <div v-else class="ai-empty">暂无分析内容</div>
+              </div>
+              <div v-else class="ai-empty">暂无分析结果</div>
+            </template>
           </div>
         </div>
         <AnalyticsPanel
