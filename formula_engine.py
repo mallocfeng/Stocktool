@@ -87,6 +87,8 @@ class TdxFormulaEngine:
             df["date"] = pd.to_datetime(df["date"])
             df.set_index("date", inplace=True)
         self.df = df
+        self.logs: list[str] = []
+        self._missing_symbols: set[str] = set()
 
         price_series = {
             "C": df["close"],
@@ -121,6 +123,34 @@ class TdxFormulaEngine:
             "np": np,
             "pd": pd,
         }
+        self._base_ctx: Dict[str, object] = dict(self.ctx)
+
+    def _log(self, message: str) -> None:
+        self.logs.append(message)
+
+    def _blank_series(self, value=np.nan) -> pd.Series:
+        return pd.Series(value, index=self.df.index)
+
+    def _register_missing_symbol(self, symbol: str, raw_line: str) -> None:
+        sym = symbol.strip()
+        if not sym:
+            return
+        key = sym.upper()
+        if key in self._missing_symbols:
+            return
+        self._missing_symbols.add(key)
+        if re.search(rf"\b{re.escape(sym)}\s*\(", raw_line):
+            self._log(f"公式解析警告：未知函数 {sym}，已使用空序列占位。")
+
+            def _placeholder(*_args, **_kwargs):
+                return self._blank_series()
+
+            self.ctx[sym] = _placeholder
+            self.ctx[key] = _placeholder
+        else:
+            self._log(f"公式解析警告：未知变量 {sym}，已使用空序列占位。")
+            self.ctx[sym] = self._blank_series()
+            self.ctx[key] = self.ctx[sym]
 
     def _convert_expr(self, expr: str) -> str:
         expr = expr.strip()
@@ -229,14 +259,23 @@ class TdxFormulaEngine:
         return depth == 0
 
     def run(self, script: str) -> Tuple[pd.Series, pd.Series]:
-        for raw_line in script.splitlines():
+        self.logs = []
+        self._missing_symbols.clear()
+        self.ctx = dict(self._base_ctx)
+        script = (script or "").replace("\r\n", "\n").replace("\r", "\n")
+        script = script.replace("；", ";")
+        script = script.replace(";", "\n")
+
+        for line_no, raw_line in enumerate(script.splitlines(), start=1):
             line = raw_line.strip()
             if not line:
                 continue
             if line.startswith(("{", "}", "//", "#", "(*", "*)")):
                 continue
-            if line.endswith(";"):
-                line = line[:-1]
+            if "//" in line:
+                line = line.split("//", 1)[0].strip()
+                if not line:
+                    continue
 
             line = self._normalize_colon_assignment(line)
 
@@ -245,17 +284,52 @@ class TdxFormulaEngine:
                 name = name.strip()
                 expr = self._convert_expr(expr)
                 expr = expr.strip()
-                value = eval(expr, {}, dict(self.ctx))
-                self.ctx[name] = value
-                if name.upper() != name:
-                    self.ctx[name.upper()] = value
+                last_exc: Exception | None = None
+                for _ in range(3):
+                    try:
+                        value = eval(expr, {}, dict(self.ctx))
+                        self.ctx[name] = value
+                        if name.upper() != name:
+                            self.ctx[name.upper()] = value
+                        last_exc = None
+                        break
+                    except NameError as exc:
+                        last_exc = exc
+                        match = re.search(r"name '([^']+)' is not defined", str(exc))
+                        if match:
+                            self._register_missing_symbol(match.group(1), line)
+                            continue
+                        break
+                    except Exception as exc:  # noqa: BLE001
+                        last_exc = exc
+                        break
+                if last_exc is not None:
+                    self._log(f"公式解析错误：第 {line_no} 行 `{raw_line.strip()}` -> {type(last_exc).__name__}: {last_exc}")
             else:
                 expr = self._convert_expr(line)
-                _ = eval(expr, {}, dict(self.ctx))
+                last_exc: Exception | None = None
+                for _ in range(3):
+                    try:
+                        _ = eval(expr, {}, dict(self.ctx))
+                        last_exc = None
+                        break
+                    except NameError as exc:
+                        last_exc = exc
+                        match = re.search(r"name '([^']+)' is not defined", str(exc))
+                        if match:
+                            self._register_missing_symbol(match.group(1), line)
+                            continue
+                        break
+                    except Exception as exc:  # noqa: BLE001
+                        last_exc = exc
+                        break
+                if last_exc is not None:
+                    self._log(f"公式解析错误：第 {line_no} 行 `{raw_line.strip()}` -> {type(last_exc).__name__}: {last_exc}")
 
         buy = self.ctx.get("B_COND")
         if buy is None:
-            raise ValueError("公式中未定义 B_COND（买入条件）。")
+            self._log("公式解析错误：未定义 B_COND（买入条件），已使用全 False 信号继续回测。")
+            buy = pd.Series(False, index=self.df.index)
 
         sell = self.ctx.get("S_COND")
         if sell is None:

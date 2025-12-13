@@ -101,6 +101,8 @@ def _run_backtests(params: BacktestParams, stop_event, emit) -> None:
 
     engine = TdxFormulaEngine(df.copy())
     buy, sell = engine.run(params.formula)
+    for msg in getattr(engine, "logs", []) or []:
+        emit("log", msg)
     check_cancel()
 
     if not buy.any():
