@@ -407,12 +407,29 @@ def atr_based_stop(df: pd.DataFrame, period: int = 14) -> Dict[str, float]:
     atr = tr.rolling(period, min_periods=1).mean()
     last_price = float(close.iloc[-1])
     last_atr = float(atr.iloc[-1])
+    stop_loss = max(last_price - 2 * last_atr, 0)
+    take_profit = last_price + 2 * last_atr
+    trailing_stop = max(last_price - 1.5 * last_atr, 0)
+    stop_loss_distance = last_price - stop_loss
+    take_profit_distance = take_profit - last_price
+    stop_loss_pct = (stop_loss_distance / last_price * 100) if last_price else None
+    take_profit_pct = (take_profit_distance / last_price * 100) if last_price else None
+    stop_loss_atr = (stop_loss_distance / last_atr) if last_atr else None
+    take_profit_atr = (take_profit_distance / last_atr) if last_atr else None
+    risk_reward = (take_profit_distance / stop_loss_distance) if stop_loss_distance > 0 else None
     return {
         "last_price": last_price,
         "atr": last_atr,
-        "suggest_stop_loss": max(last_price - 2 * last_atr, 0),
-        "suggest_take_profit": last_price + 2 * last_atr,
-        "trailing_stop": max(last_price - 1.5 * last_atr, 0),
+        "suggest_stop_loss": stop_loss,
+        "suggest_take_profit": take_profit,
+        "trailing_stop": trailing_stop,
+        "stop_loss_distance": stop_loss_distance,
+        "take_profit_distance": take_profit_distance,
+        "stop_loss_pct": stop_loss_pct,
+        "take_profit_pct": take_profit_pct,
+        "stop_loss_atr": stop_loss_atr,
+        "take_profit_atr": take_profit_atr,
+        "risk_reward": risk_reward,
     }
 
 

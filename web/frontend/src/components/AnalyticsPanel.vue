@@ -882,8 +882,14 @@ const switchTab = (tab) => {
 };
 
 const heatmapValue = (xIdx, yIdx) => heatmapLookup.value[`${xIdx}-${yIdx}`] ?? 0;
-const formatPercent = (val) => `${(val * 100).toFixed(2)}%`;
-const formatAmount = (val) => (Number.isFinite(Number(val)) ? Number(val).toLocaleString('zh-CN', { maximumFractionDigits: 2 }) : '-');
+const formatAmount = (val) =>
+  Number.isFinite(Number(val)) ? Number(val).toLocaleString('zh-CN', { maximumFractionDigits: 2 }) : '-';
+const formatPercent = (val) =>
+  Number.isFinite(Number(val)) ? `${Number(val).toFixed(2)}%` : '-';
+const formatRiskReward = (val) =>
+  Number.isFinite(Number(val)) ? Number(val).toFixed(2) : '-';
+const formatATRMultiple = (val) =>
+  Number.isFinite(Number(val)) ? `${Number(val).toFixed(2)}×ATR` : '-';
 const formatDrawdown = (val) => {
   if (val === null || val === undefined || val === '') return '-';
   const num = Number(val);
@@ -1113,25 +1119,45 @@ const isCategoryDisabled = (key) => {
       <section v-else-if="activeTab === 'stop'">
         <div v-if="!stopSuggestion" class="empty">点击标签即可获取最新建议</div>
         <div v-else class="stop-grid">
-          <div>
+          <div class="stop-card">
             <span>最新价</span>
-            <strong>{{ stopSuggestion.last_price?.toFixed(2) }}</strong>
+            <strong>{{ formatAmount(stopSuggestion.last_price) }}</strong>
           </div>
-          <div>
-            <span>ATR</span>
-            <strong>{{ stopSuggestion.atr?.toFixed(2) }}</strong>
+          <div class="stop-card">
+            <span>ATR (14)</span>
+            <strong>{{ formatAmount(stopSuggestion.atr) }}</strong>
           </div>
-          <div>
+          <div class="stop-card">
             <span>建议止损</span>
-            <strong class="negative">{{ stopSuggestion.suggest_stop_loss?.toFixed(2) }}</strong>
+            <strong class="negative">{{ formatAmount(stopSuggestion.suggest_stop_loss) }}</strong>
           </div>
-          <div>
+          <div class="stop-card">
+            <span>止损距离 / 占比</span>
+            <strong>
+              {{ formatAmount(stopSuggestion.stop_loss_distance) }}
+              <em>{{ formatPercent(stopSuggestion.stop_loss_pct) }}</em>
+            </strong>
+            <small>{{ formatATRMultiple(stopSuggestion.stop_loss_atr) }}</small>
+          </div>
+          <div class="stop-card">
             <span>建议止盈</span>
-            <strong class="positive">{{ stopSuggestion.suggest_take_profit?.toFixed(2) }}</strong>
+            <strong class="positive">{{ formatAmount(stopSuggestion.suggest_take_profit) }}</strong>
           </div>
-          <div>
+          <div class="stop-card">
+            <span>止盈距离 / 占比</span>
+            <strong>
+              {{ formatAmount(stopSuggestion.take_profit_distance) }}
+              <em>{{ formatPercent(stopSuggestion.take_profit_pct) }}</em>
+            </strong>
+            <small>{{ formatATRMultiple(stopSuggestion.take_profit_atr) }}</small>
+          </div>
+          <div class="stop-card">
             <span>跟踪止损</span>
-            <strong>{{ stopSuggestion.trailing_stop?.toFixed(2) }}</strong>
+            <strong>{{ formatAmount(stopSuggestion.trailing_stop) }}</strong>
+          </div>
+          <div class="stop-card">
+            <span>风险回报</span>
+            <strong>{{ formatRiskReward(stopSuggestion.risk_reward) }}</strong>
           </div>
         </div>
       </section>
