@@ -99,6 +99,10 @@ DEFAULT_ALLOW_ORIGINS = [
     "http://127.0.0.1:4173",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://104.207.154.5",
+    "http://xpq.qazwsx123.uk",
+    "https://104.207.154.5",
+    "https://xpq.qazwsx123.uk",
 ]
 allow_origins_env = os.environ.get("STOCKTOOL_ALLOW_ORIGINS")
 ALLOW_ORIGINS = (
