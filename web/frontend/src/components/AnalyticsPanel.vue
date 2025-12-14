@@ -38,6 +38,7 @@ const stopSuggestion = ref(null);
 const heatmapData = ref(null);
 const heatmapLookup = ref({});
 const heatmapMessage = ref('');
+const heatmapMaxAbs = ref(0);
 const dailyBrief = ref('');
 const multiSignals = ref([]);
 const multiMessage = ref('');
@@ -577,6 +578,13 @@ const fetchHeatmap = async () => {
         map[`${x}-${y}`] = val;
       });
       heatmapLookup.value = map;
+      const maxVal = Math.max(
+        0,
+        ...res.data.data.map(([, , val]) =>
+          Number.isFinite(Number(val)) ? Math.abs(Number(val)) : 0,
+        ),
+      );
+      heatmapMaxAbs.value = Math.max(maxVal, 0.01);
       heatmapMessage.value = '';
     } else {
       heatmapData.value = null;
@@ -882,6 +890,17 @@ const switchTab = (tab) => {
 };
 
 const heatmapValue = (xIdx, yIdx) => heatmapLookup.value[`${xIdx}-${yIdx}`] ?? 0;
+const heatmapColor = (value) => {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 'rgba(15, 23, 42, 0.4)';
+  const base = heatmapMaxAbs.value || 0.01;
+  const magnitude = Math.min(Math.abs(num) / base, 1);
+  const alpha = 0.25 + magnitude * 0.6;
+  if (num >= 0) {
+    return `rgba(34,197,94,${alpha})`;
+  }
+  return `rgba(239,68,68,${alpha})`;
+};
 const formatAmount = (val) =>
   Number.isFinite(Number(val)) ? Number(val).toLocaleString('zh-CN', { maximumFractionDigits: 2 }) : '-';
 const formatPercent = (val) =>
@@ -1450,10 +1469,9 @@ const isCategoryDisabled = (key) => {
               <span
                 v-for="(xLabel, xIdx) in heatmapData.x_labels"
                 :key="xLabel + yIdx"
-                :style="{ backgroundColor: heatmapValue(xIdx, yIdx) > 0 ? 'rgba(34,197,94,0.6)' : 'rgba(239,68,68,0.6)' }"
-              >
-                {{ (heatmapValue(xIdx, yIdx) * 100).toFixed(0) }}
-              </span>
+                :style="{ backgroundColor: heatmapColor(heatmapValue(xIdx, yIdx)) }"
+                class="heatmap-cell"
+              ></span>
             </div>
           </div>
         </div>
