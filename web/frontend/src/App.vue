@@ -365,7 +365,8 @@ const handleAIMouseLeave = () => {
       </div>
     </header>
     <transition name="fade">
-      <section v-if="showTopTip" class="app-tip-card">
+      <div v-if="showTopTip" class="app-tip-wrapper">
+        <section class="app-tip-card">
         <div class="app-tip-content">
           <strong>版本更新提醒</strong>
           <ul class="tip-list">
@@ -375,8 +376,9 @@ const handleAIMouseLeave = () => {
             <li>AI 分析默认关闭，有需再打开即可开始服务。</li>
           </ul>
         </div>
-        <button type="button" class="tip-close" @click="showTopTip = false">关闭</button>
+        <button type="button" class="tip-close" @click="showTopTip = false" aria-label="关闭提示">✕</button>
       </section>
+    </div>
     </transition>
 
     <main class="app-main">
