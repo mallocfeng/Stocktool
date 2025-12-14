@@ -329,10 +329,14 @@ label {
   box-shadow: 0 16px 40px rgba(var(--overlay-rgb), 0.15);
   color: var(--text-primary);
   width: 100%;
+  max-width: calc(100% - 40px);
+  box-sizing: border-box;
 }
 
 .app-tip-wrapper {
   padding: 0 20px;
+  display: flex;
+  justify-content: center;
 }
 
 .app-tip-content {
