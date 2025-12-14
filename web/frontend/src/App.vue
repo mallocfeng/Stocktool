@@ -156,6 +156,12 @@ const setThemeMode = (mode) => {
   persistThemeMode(next);
 };
 
+watch(hasData, (value) => {
+  if (value) {
+    showTopTip.value = false;
+  }
+});
+
 const handleSystemThemeChange = (event) => {
   systemPrefersDark.value = !!event.matches;
 };
