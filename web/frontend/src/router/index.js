@@ -3,8 +3,7 @@ import BacktestView from '../views/BacktestView.vue';
 import LoginView from '../views/LoginView.vue';
 import AdminView from '../views/AdminView.vue';
 import { ensureUserLoaded, currentUser, isAdmin } from '../lib/useAuth';
-
-const disableAuth = import.meta.env.VITE_DISABLE_AUTH === 'true';
+import { disableAuth } from '../lib/authConfig';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -44,7 +43,9 @@ router.beforeEach(async (to) => {
   if (to.meta.public) {
     return true;
   }
-  await ensureUserLoaded();
+  if (!disableAuth) {
+    await ensureUserLoaded();
+  }
   if (!currentUser.value) {
     return { path: '/login', query: { redirect: to.fullPath } };
   }

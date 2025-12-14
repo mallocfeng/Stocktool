@@ -8,6 +8,7 @@ import ChartPanel from '../components/ChartPanel.vue';
 import AnalyticsPanel from '../components/AnalyticsPanel.vue';
 import { useAuth } from '../lib/useAuth';
 import { useTheme } from '../lib/useTheme';
+import { disableAuth } from '../lib/authConfig';
 
 marked.setOptions({
   breaks: true,
@@ -44,6 +45,13 @@ const aiEnabled = ref(false);
 const router = useRouter();
 const auth = useAuth();
 const currentUser = auth.currentUser;
+const showUserInfo = computed(() => !disableAuth && Boolean(currentUser.value));
+const showAdminLink = computed(() => !disableAuth && currentUser.value?.role === 'admin');
+const isAdminUser = computed(() => currentUser.value?.role === 'admin');
+const usernameDisplay = computed(() => currentUser.value?.username || '未命名');
+const goAdmin = () => {
+  router.push({ path: '/admin' });
+};
 const { themeMode, resolvedTheme, themeOptions, setThemeMode } = useTheme();
 
 const overlayActive = computed(() => isRunning.value || overlayBlocking.value);
@@ -347,6 +355,18 @@ const handleAIMouseLeave = () => {
         <p>一键上传 CSV · 自动回测 · 智能洞察</p>
       </div>
       <div class="header-actions">
+        <div v-if="showUserInfo" class="user-actions">
+          <div class="user-info">
+            <span class="user-info-label">登录用户</span>
+            <strong>
+              {{ usernameDisplay }}
+              <span class="user-role" v-if="isAdminUser">（管理员）</span>
+            </strong>
+          </div>
+          <button class="secondary" type="button" @click="openPasswordModal">修改密码</button>
+          <button class="secondary danger" type="button" @click="handleLogout">退出登录</button>
+          <button v-if="showAdminLink" class="secondary" type="button" @click="goAdmin">管理员后台</button>
+        </div>
         <div class="theme-toggle" role="group" aria-label="颜色模式">
           <div class="theme-options">
             <button

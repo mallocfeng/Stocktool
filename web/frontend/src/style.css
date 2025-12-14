@@ -616,6 +616,7 @@ label {
   border-radius: 999px;
   border: 1px solid var(--border);
   background: rgba(var(--surface-rgb), 0.45);
+  margin-left: auto;
 }
 
 .theme-options {
@@ -643,6 +644,41 @@ label {
   background: var(--accent);
   color: #fff;
   box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.user-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1;
+  text-align: right;
+}
+
+.user-info-label {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  margin-right: 6px;
+  align-self: center;
+}
+
+.user-info strong {
+  font-size: 1rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.user-role {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--text-secondary);
 }
 
 .app-main {

@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { login } from '../lib/useAuth';
+import { disableAuth } from '../lib/authConfig';
 import { useTheme } from '../lib/useTheme';
 
 const router = useRouter();
@@ -10,7 +11,6 @@ const form = ref({ username: '', password: '' });
 const submitting = ref(false);
 const error = ref('');
 const registrationNotice = computed(() => route.query.registered === '1');
-const disableAuth = import.meta.env.VITE_DISABLE_AUTH === 'true';
 const { themeMode, themeOptions, setThemeMode } = useTheme();
 
 if (disableAuth) {

@@ -88,7 +88,8 @@ if SESSION_SAME_SITE not in {"lax", "strict", "none"}:
     SESSION_SAME_SITE = "lax"
 SESSION_MAX_AGE = int(os.environ.get("STOCKTOOL_SESSION_MAX_AGE", str(7 * 24 * 3600)))
 PASSWORD_HASHER = PasswordHasher(time_cost=2, memory_cost=102400, parallelism=8, hash_len=32, type=Type.ID)
-DISABLE_AUTH = os.environ.get("STOCKTOOL_DISABLE_AUTH", "true").lower() in ("1", "true", "yes")
+AUTH_DISABLED = False  # 把这里改为 True 可在代码层直接关闭登录（无需设置环境变量）
+DISABLE_AUTH = AUTH_DISABLED
 _BYPASS_USERNAME = os.environ.get("STOCKTOOL_BYPASS_USERNAME", "admin")
 _BYPASS_ROLE = os.environ.get("STOCKTOOL_BYPASS_ROLE", "admin")
 

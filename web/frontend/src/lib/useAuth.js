@@ -1,7 +1,6 @@
 import { ref, computed } from 'vue';
 import axios from 'axios';
-
-const disableAuth = import.meta.env.VITE_DISABLE_AUTH !== 'false';
+import { disableAuth } from './authConfig';
 const fallbackUser = {
   id: 0,
   username: import.meta.env.VITE_BYPASS_USERNAME || 'admin',
@@ -12,6 +11,9 @@ const fallbackUser = {
 };
 
 const currentUser = ref(null);
+if (disableAuth) {
+  currentUser.value = fallbackUser;
+}
 let pendingLoad = null;
 
 const loadCurrentUser = async () => {
