@@ -4,6 +4,8 @@ import LoginView from '../views/LoginView.vue';
 import AdminView from '../views/AdminView.vue';
 import { ensureUserLoaded, currentUser, isAdmin } from '../lib/useAuth';
 
+const disableAuth = import.meta.env.VITE_DISABLE_AUTH === 'true';
+
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -45,6 +47,9 @@ router.beforeEach(async (to) => {
   await ensureUserLoaded();
   if (!currentUser.value) {
     return { path: '/login', query: { redirect: to.fullPath } };
+  }
+  if (currentUser.value && to.path === '/login') {
+    return { path: '/' };
   }
   if (to.meta.requiresAdmin && !isAdmin.value) {
     return { path: '/' };

@@ -88,6 +88,9 @@ if SESSION_SAME_SITE not in {"lax", "strict", "none"}:
     SESSION_SAME_SITE = "lax"
 SESSION_MAX_AGE = int(os.environ.get("STOCKTOOL_SESSION_MAX_AGE", str(7 * 24 * 3600)))
 PASSWORD_HASHER = PasswordHasher(time_cost=2, memory_cost=102400, parallelism=8, hash_len=32, type=Type.ID)
+DISABLE_AUTH = os.environ.get("STOCKTOOL_DISABLE_AUTH", "true").lower() in ("1", "true", "yes")
+_BYPASS_USERNAME = os.environ.get("STOCKTOOL_BYPASS_USERNAME", "admin")
+_BYPASS_ROLE = os.environ.get("STOCKTOOL_BYPASS_ROLE", "admin")
 
 if SESSION_SECRET == "stocktool-session-secret":
     print("WARNING: using default session secret; set STOCKTOOL_SESSION_SECRET for production safety")
@@ -359,6 +362,18 @@ class RegisterRequest(BaseModel):
     password: str
 
 
+def _bypass_user() -> UserSummary:
+    now_iso = datetime.utcnow().replace(microsecond=0).isoformat()
+    return UserSummary(
+        id=0,
+        username=_BYPASS_USERNAME,
+        role=_BYPASS_ROLE,
+        is_active=True,
+        disabled_until=None,
+        created_at=now_iso,
+    )
+
+
 class AdminResetPasswordRequest(BaseModel):
     password: str
 
@@ -488,6 +503,8 @@ def _ensure_user_active(user: Dict[str, Any]) -> None:
 
 
 def get_current_user(request: Request, db: sqlite3.Connection = Depends(get_db)) -> UserSummary:
+    if DISABLE_AUTH:
+        return _bypass_user()
     user_id = request.session.get("user_id")
     if not user_id:
         raise HTTPException(status_code=401, detail="未登录")
@@ -527,6 +544,9 @@ def register(payload: RegisterRequest, db: sqlite3.Connection = Depends(get_db))
 
 @app.post("/login", response_model=UserSummary)
 def login(payload: LoginRequest, request: Request, db: sqlite3.Connection = Depends(get_db)):
+    if DISABLE_AUTH:
+        request.session.clear()
+        return _bypass_user()
     row = db.execute("SELECT * FROM users WHERE username = ?", (payload.username,)).fetchone()
     if not row:
         time.sleep(0.3)

@@ -414,6 +414,9 @@ def backtest_dynamic_capital(
     max_add_steps_raw = config.get("maxAddSteps", 3)
     max_add_steps = int(max_add_steps_raw) if isinstance(max_add_steps_raw, (int, float)) else 0
     max_limit = _to_float(config.get("maxInvestmentLimit"), initial_capital)
+    single_limit_value = max(0.0, _to_float(config.get("singleInvestmentLimit"), 0.0))
+    force_one_lot_first = bool(config.get("forceOneLotEntry"))
+    allow_single_limit_override = bool(config.get("allowSingleLimitOverride"))
     reset_on_win = bool(config.get("resetOnWin", True))
     drawdown_limit_raw = _to_float(config.get("maxDrawdownLimit"), 0.0)
     hedge_enabled = bool(config.get("enableHedge"))
@@ -525,18 +528,44 @@ def backtest_dynamic_capital(
                     baseline_pending_exit = False
 
         if position == 0 and buy.iloc[i]:
-            base_budget = clamp_amount(next_amount_main if not force_stop else initial_investment)
+            base_budget_raw = next_amount_main if not force_stop else initial_investment
+            base_budget = (
+                base_budget_raw if force_one_lot_first and position == 0 else clamp_amount(base_budget_raw)
+            )
             base_shares = floor_lot(int(base_budget // price))
             extra_shares = 0
             if not force_stop and pending_loss_steps_main > 0 and loss_step_lots > 0:
                 extra_shares = int(loss_step_lots * LOT_SIZE * pending_loss_steps_main)
-            if max_limit > 0:
-                max_shares_limit = floor_lot(int(max_limit // price))
+            total_limit_shares = floor_lot(int(max_limit // price)) if max_limit > 0 else None
+            if force_one_lot_first:
+                base_target_shares = LOT_SIZE
             else:
-                max_shares_limit = None
-            desired_shares = base_shares + extra_shares
-            if max_shares_limit is not None:
-                desired_shares = min(desired_shares, max_shares_limit)
+                base_target_shares = base_shares
+                if total_limit_shares is not None:
+                    base_target_shares = min(base_target_shares, total_limit_shares)
+            additional_shares = extra_shares
+            if total_limit_shares is not None:
+                remaining_shares = max(0, total_limit_shares - base_target_shares)
+                additional_shares = min(additional_shares, remaining_shares)
+            addition_note = None
+            if single_limit_value > 0 and additional_shares > 0:
+                amount_with_fee = additional_shares * price * (1 + fee_rate)
+                while additional_shares >= LOT_SIZE and amount_with_fee > single_limit_value:
+                    additional_shares -= LOT_SIZE
+                    amount_with_fee = additional_shares * price * (1 + fee_rate)
+                if additional_shares < LOT_SIZE:
+                    if additional_shares <= 0:
+                        if allow_single_limit_override:
+                            additional_shares = LOT_SIZE
+                            addition_note = "单笔上限允许忽略"
+                        else:
+                            addition_note = "单笔上限限制"
+                    else:
+                        # Keep whatever is left above zero
+                        pass
+                    if additional_shares < LOT_SIZE and not allow_single_limit_override:
+                        additional_shares = 0
+            desired_shares = base_target_shares + additional_shares
             if desired_shares <= 0 or cash_main <= 0:
                 pass
             else:
@@ -819,6 +848,9 @@ def backtest_dynamic_capital(
         "lossStepAmount": float(loss_step_lots),
         "maxAddSteps": max_add_steps,
         "maxInvestmentLimit": float(max_limit),
+        "singleInvestmentLimit": float(single_limit_value),
+        "forceOneLotEntry": force_one_lot_first,
+        "allowSingleLimitOverride": allow_single_limit_override,
         "resetOnWin": reset_on_win,
         "maxLossStreakUsed": int(max_loss_streak_used),
         "maxInvestmentUsed": float(max_investment_used),

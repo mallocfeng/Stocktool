@@ -17,7 +17,7 @@
         const hostname = window.location.hostname;
         const backendPort = window.__STOCKTOOL_API_PORT || "8000";
         const portSegment = backendPort ? `:${backendPort}` : "";
-        window.__STOCKTOOL_RUNTIME_API_BASE = `${protocol}//${hostname}${portSegment}/api`;
+        window.__STOCKTOOL_RUNTIME_API_BASE = `${protocol}//${hostname}${portSegment}`;
       })();
     </script>
     <script type="module" src="/src/main.js"></script>

@@ -51,6 +51,9 @@ const config = reactive({
       lossStepAmount: 10,
       maxAddSteps: 5,
       maxInvestmentLimit: 50000,
+      singleInvestmentLimit: '',
+      forceOneLotEntry: false,
+      allowSingleLimitOverride: false,
       resetOnWin: true,
       maxDrawdownLimit: '',
       enableHedge: true,
@@ -467,21 +470,24 @@ const buildStrategiesPayload = () => {
       accumulate: Boolean(config.strategies.grid.accumulate),
     };
   }
-  if (config.strategies.dynamic?.enabled) {
-    const drawdownLimit = parseDrawdownLimit(config.strategies.dynamic.maxDrawdownLimit);
-    const dynamicCfg = {
-      initialInvestment: toNumber(config.initial_capital),
-      lossStepAmount: toNumber(config.strategies.dynamic.lossStepAmount),
-      maxAddSteps: parseInt(config.strategies.dynamic.maxAddSteps, 10) || 0,
-      maxInvestmentLimit: toNumber(config.strategies.dynamic.maxInvestmentLimit),
-      resetOnWin: Boolean(config.strategies.dynamic.resetOnWin),
-      enableHedge: Boolean(config.strategies.dynamic.enableHedge),
-      hedgeInitialInvestment: toNumber(config.strategies.dynamic.hedgeInitialInvestment),
-      hedgeLossStepAmount: toNumber(config.strategies.dynamic.hedgeLossStepAmount),
-      hedgeMaxAddSteps: parseInt(config.strategies.dynamic.hedgeMaxAddSteps, 10) || 0,
-      maxDrawdownLimit: drawdownLimit,
-    };
-    if (drawdownLimit === null) {
+    if (config.strategies.dynamic?.enabled) {
+      const drawdownLimit = parseDrawdownLimit(config.strategies.dynamic.maxDrawdownLimit);
+      const dynamicCfg = {
+        initialInvestment: toNumber(config.initial_capital),
+        lossStepAmount: toNumber(config.strategies.dynamic.lossStepAmount),
+        maxAddSteps: parseInt(config.strategies.dynamic.maxAddSteps, 10) || 0,
+        maxInvestmentLimit: toNumber(config.strategies.dynamic.maxInvestmentLimit),
+        singleInvestmentLimit: toNumber(config.strategies.dynamic.singleInvestmentLimit),
+        resetOnWin: Boolean(config.strategies.dynamic.resetOnWin),
+        enableHedge: Boolean(config.strategies.dynamic.enableHedge),
+        hedgeInitialInvestment: toNumber(config.strategies.dynamic.hedgeInitialInvestment),
+        hedgeLossStepAmount: toNumber(config.strategies.dynamic.hedgeLossStepAmount),
+        hedgeMaxAddSteps: parseInt(config.strategies.dynamic.hedgeMaxAddSteps, 10) || 0,
+        forceOneLotEntry: Boolean(config.strategies.dynamic.forceOneLotEntry),
+        allowSingleLimitOverride: Boolean(config.strategies.dynamic.allowSingleLimitOverride),
+        maxDrawdownLimit: drawdownLimit,
+      };
+      if (drawdownLimit === null) {
       delete dynamicCfg.maxDrawdownLimit;
     }
     strategies.dynamic = dynamicCfg;
@@ -733,8 +739,23 @@ const runBacktest = () => {
                     <input type="number" v-model="config.strategies.dynamic.maxAddSteps" min="0" />
                   </label>
                   <label class="field">
-                    <span>单笔资金上限</span>
+                    <span>启用 1 手首单</span>
+                    <input type="checkbox" v-model="config.strategies.dynamic.forceOneLotEntry" />
+                    <small class="field-hint">首单固定 1 手，后续加仓再受金额限制</small>
+                  </label>
+                  <label class="field">
+                    <span>单笔加仓上限</span>
+                    <input type="number" v-model="config.strategies.dynamic.singleInvestmentLimit" min="0" />
+                    <small class="field-hint">用于限制每次加仓的金额（首单 1 手不受此限）</small>
+                  </label>
+                  <label class="checkbox-row">
+                    <input type="checkbox" v-model="config.strategies.dynamic.allowSingleLimitOverride" />
+                    <span>当单笔上限低于 1 手时仍允许加仓</span>
+                  </label>
+                  <label class="field">
+                    <span>总资金上限</span>
                     <input type="number" v-model="config.strategies.dynamic.maxInvestmentLimit" min="0" />
+                    <small class="field-hint">当前持仓市值+加仓不得超过此额度</small>
                   </label>
                   <label class="field">
                     <span>最大允许回撤</span>
@@ -749,10 +770,10 @@ const runBacktest = () => {
                     <span>盈利后恢复初始金额</span>
                   </label>
                   <div class="sub-section">
-                    <label class="checkbox-row">
-                      <input type="checkbox" v-model="config.strategies.dynamic.enableHedge" />
-                      <span>启用反向对冲</span>
-                    </label>
+                  <label class="checkbox-row">
+                    <input type="checkbox" v-model="config.strategies.dynamic.enableHedge" />
+                    <span>启用反向对冲</span>
+                  </label>
                     <div class="sub-grid" v-if="config.strategies.dynamic.enableHedge">
                       <label class="field">
                         <span>对冲初始金额</span>

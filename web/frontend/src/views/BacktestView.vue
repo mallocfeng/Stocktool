@@ -44,7 +44,6 @@ const aiEnabled = ref(false);
 const router = useRouter();
 const auth = useAuth();
 const currentUser = auth.currentUser;
-const isAdmin = auth.isAdmin;
 const { themeMode, resolvedTheme, themeOptions, setThemeMode } = useTheme();
 
 const overlayActive = computed(() => isRunning.value || overlayBlocking.value);
@@ -348,14 +347,6 @@ const handleAIMouseLeave = () => {
         <p>一键上传 CSV · 自动回测 · 智能洞察</p>
       </div>
       <div class="header-actions">
-        <div v-if="currentUser" class="user-toolbar">
-          <span class="user-label">登录：{{ currentUser.username }}（{{ currentUser.role }}）</span>
-          <button class="secondary" type="button" @click="openPasswordModal">
-            修改密码
-          </button>
-          <button class="secondary" type="button" @click="handleLogout">退出登录</button>
-          <router-link v-if="isAdmin" to="/admin" class="admin-link">管理员后台</router-link>
-        </div>
         <div class="theme-toggle" role="group" aria-label="颜色模式">
           <div class="theme-options">
             <button

@@ -1,10 +1,24 @@
 import { ref, computed } from 'vue';
 import axios from 'axios';
 
+const disableAuth = import.meta.env.VITE_DISABLE_AUTH !== 'false';
+const fallbackUser = {
+  id: 0,
+  username: import.meta.env.VITE_BYPASS_USERNAME || 'admin',
+  role: import.meta.env.VITE_BYPASS_ROLE || 'admin',
+  is_active: true,
+  disabled_until: null,
+  created_at: new Date().toISOString(),
+};
+
 const currentUser = ref(null);
 let pendingLoad = null;
 
 const loadCurrentUser = async () => {
+  if (disableAuth) {
+    currentUser.value = fallbackUser;
+    return;
+  }
   try {
     const res = await axios.get('/me');
     currentUser.value = res.data;
@@ -14,6 +28,10 @@ const loadCurrentUser = async () => {
 };
 
 export function ensureUserLoaded() {
+  if (disableAuth) {
+    currentUser.value = fallbackUser;
+    return Promise.resolve();
+  }
   if (!pendingLoad) {
     pendingLoad = loadCurrentUser().finally(() => {
       pendingLoad = null;
@@ -23,6 +41,10 @@ export function ensureUserLoaded() {
 }
 
 export async function login(payload) {
+  if (disableAuth) {
+    currentUser.value = fallbackUser;
+    return;
+  }
   await axios.post('/login', payload);
   await loadCurrentUser();
 }

@@ -10,7 +10,12 @@ const form = ref({ username: '', password: '' });
 const submitting = ref(false);
 const error = ref('');
 const registrationNotice = computed(() => route.query.registered === '1');
+const disableAuth = import.meta.env.VITE_DISABLE_AUTH === 'true';
 const { themeMode, themeOptions, setThemeMode } = useTheme();
+
+if (disableAuth) {
+  router.replace('/');
+}
 
 const handleSubmit = async () => {
   if (!form.value.username.trim() || !form.value.password) {
@@ -20,10 +25,12 @@ const handleSubmit = async () => {
   submitting.value = true;
   error.value = '';
   try {
-    await login({
-      username: form.value.username.trim(),
-      password: form.value.password,
-    });
+    if (!disableAuth) {
+      await login({
+        username: form.value.username.trim(),
+        password: form.value.password,
+      });
+    }
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/';
     router.replace(redirect);
   } catch (exc) {
