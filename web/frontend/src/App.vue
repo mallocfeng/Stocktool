@@ -311,7 +311,12 @@ const requestAIInsight = async (force = false) => {
     persistAIInsight(datasetSignature.value, res.data);
   } catch (e) {
     if (currentTicket !== aiTicket || !aiEnabled.value) return;
-    aiError.value = e.response?.data?.detail || e.message;
+    if (e.response?.status === 403) {
+      aiError.value =
+        '免费额度已用完：https://mallocfeng1982.win/v1/chat/completions，请联系管理员';
+    } else {
+      aiError.value = e.response?.data?.detail || e.message;
+    }
   } finally {
     if (currentTicket === aiTicket) {
       aiLoading.value = false;
@@ -464,7 +469,7 @@ const handleAIMouseLeave = () => {
                 <span class="spinner" aria-hidden="true"></span>
                 正在分析当前股票，请稍等…
               </div>
-              <div v-else-if="aiError" class="ai-error">AI 分析失败：{{ aiError }}</div>
+              <div v-else-if="aiError" class="ai-error">AI 调用失败：{{ aiError }}</div>
               <div v-else-if="aiResult?.analysis" class="ai-content">
                 <ul class="ai-stats" v-if="aiResult.stats">
                   <li>区间：{{ aiResult.stats.date_range }}</li>
