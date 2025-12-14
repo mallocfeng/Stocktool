@@ -10,3 +10,4 @@ web/backend/uploads/
 .DS_Store
 */.DS_Store
 **/.DS_Store
+web/backend/users.db
