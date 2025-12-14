@@ -368,10 +368,12 @@ const handleAIMouseLeave = () => {
       <section v-if="showTopTip" class="app-tip-card">
         <div class="app-tip-content">
           <strong>版本更新提醒</strong>
-          <p>
-            本次发布进一步强化通达信（TDX）公式编辑器的语法识别与提示，同时拓展 样式更强的热力图显示（颜色深浅即代表收益/亏损幅度）。
-            如果未启用“动态资金管理”或“买入对冲”功能，对应卡片和图表不会出现在主视图，避免空白内容。AI 分析模块默认关闭，请在需要时手动激活。
-          </p>
+          <ul class="tip-list">
+            <li>通达信（TDX）编辑器语法识别升级，语句提示更贴合原生体验。</li>
+            <li>收益热力图改为以颜色深浅表示盈亏幅度，提升视觉辨识度。</li>
+            <li>未启用「动态资金管理」或「买入对冲」则不会展示相关卡片，避免空白模块。</li>
+            <li>AI 分析默认关闭，有需再打开即可开始服务。</li>
+          </ul>
         </div>
         <button type="button" class="tip-close" @click="showTopTip = false">关闭</button>
       </section>

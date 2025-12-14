@@ -328,6 +328,7 @@ label {
   border: 1px solid rgba(var(--tone-1-rgb), 0.45);
   box-shadow: 0 16px 40px rgba(var(--overlay-rgb), 0.15);
   color: var(--text-primary);
+  width: calc(100% - 3.6rem);
 }
 
 .app-tip-content {
@@ -357,6 +358,17 @@ label {
 .tip-close:hover {
   background: rgba(var(--overlay-rgb), 0.18);
   color: var(--text-primary);
+}
+
+.tip-list {
+  list-style: disc;
+  padding-left: 1.2rem;
+  margin: 0;
+}
+
+.tip-list li {
+  margin-bottom: 0.25rem;
+  font-size: 0.95rem;
 }
 
 .header-actions {
