@@ -47,10 +47,9 @@ StockTool/
 
 - 新增基于 Session 的登录 `/login`, `/logout`, `/me`，客户端通过 HttpOnly 的 Session Cookie 与服务端保持状态。
 - 管理用户的 API 统一放在 `/admin/users` 及其相关子路由，管理员必须具有 `role = admin`。
-- 密码使用 Argon2id（添加 `argon2-cffi` 依赖）；如果数据库尚无用户，服务会根据 `STOCKTOOL_ADMIN_USERNAME` / `STOCKTOOL_ADMIN_PASSWORD` 自动创建管理员账号（未设置时回退为 `admin`/`admin` 并打印警告，请立即修改）。
-- 推荐设置环境变量 `STOCKTOOL_SESSION_SECRET` 来签名 Cookie，并根据部署协议调整 `STOCKTOOL_SESSION_COOKIE_SECURE`（默认 `false`，HTTPS 环境务必开启）、`STOCKTOOL_SESSION_SAME_SITE` 与 `STOCKTOOL_SESSION_MAX_AGE`，以配合你的部署需求。
-- 如果前后端部署在不同的主机/端口，请通过 `STOCKTOOL_ALLOW_ORIGINS`（逗号分隔）或 `STOCKTOOL_ALLOW_ORIGIN_REGEX` 设置允许发送 Cookies 的来源；默认 regex (`^https?://.*$`) 允许任何 IP/域名提交，生产环境建议根据需要收紧。
-- 如果前后端部署在不同的主机/端口，请通过 `STOCKTOOL_ALLOW_ORIGINS` 列表（逗号分隔）指定允许发送 Cookies 的域名；默认允许 `localhost`/`127.0.0.1` 上的 Vite 端口（5173、4173、3000）。
+- 密码使用 Argon2id（添加 `argon2-cffi` 依赖）；如果数据库尚无用户，服务会根据 `STOCKTOOL_ADMIN_USERNAME` / `STOCKTOOL_ADMIN_PASSWORD` 自动创建管理员账号（未设置时回退为 `admin`/`admin` 并打印警告，请尽快修改并在首次登录后更新密码）。
+- 推荐设置环境变量 `STOCKTOOL_SESSION_SECRET` 来签名 Cookie，并根据部署协议调整 `STOCKTOOL_SESSION_COOKIE_SECURE`（HTTP 下保持 `false`，HTTPS 再设为 `true`）、`STOCKTOOL_SESSION_SAME_SITE`（通常 `lax`）与 `STOCKTOOL_SESSION_MAX_AGE`。启动脚本或 systemd unit 应把这些变量导出，避免默认 secret。
+- 确认 `STOCKTOOL_ALLOW_ORIGINS` 包含最终部署的域名/IP（如 `http://xpq.qazwsx123.uk,http://104.207.154.5`）；FastAPI 默认接受 `localhost/127.0.0.1`，你也可以通过 `STOCKTOOL_ALLOW_ORIGIN_REGEX` 精细控制。只有 `Origin` 在白名单、Cookie 设置与请求协议一致时，浏览器才能在 `/me` 返回 200。
 
 ### 前端（Vue 3 + Vite）
 
@@ -60,46 +59,59 @@ StockTool/
    npm install
    npm run dev -- --host 0.0.0.0
    ```
-2. 默认通过 `axios.defaults.baseURL` 调用 `VITE_API_BASE`（未设置时退回到 `/api`）。Vite 的 dev server 已配置 `server.proxy` 把 `/api/*` 代理到本地 FastAPI（`http://127.0.0.1:8000`），因此在开发模式下前后端同源、Session Cookie 会自动携带。如果部署在其它域名或网关后面，只需把 `VITE_API_BASE` 设置为完整的后端地址即可。
+2. 默认通过 `axios.defaults.baseURL` 调用 `VITE_API_BASE`（未设置时退回到 `/api`）。Vite 的 dev server 已配置 `server.proxy` 把 `/api/*` 代理到本地 FastAPI（`http://127.0.0.1:8000`），因此在开发模式下前后端同源、Session Cookie 会自动携带。如果部署在其它域名或网关后面，只需把 `VITE_API_BASE` 设置为完整的后端地址即可；生产打包时可设 `VITE_API_BASE=http://xpq.qazwsx123.uk/api`。构建后的入口还会在 `index.html` 里自动生成 `window.__STOCKTOOL_RUNTIME_API_BASE`（`http(s)://当前域名:8000/api`）以便静态部署直接使用当前 host。
    当前前端已经引入 Vue Router 构建多页面体验：`/login` 展示登录表单，`/register` 提供自助注册，登录后 `/` 展示回测主界面，管理员用户可在顶部点击跳转 `/admin` 管理账号。Axios 默认会设置 `withCredentials = true`，所有认证信息由 HttpOnly Cookie 保存，不要在客户端存储令牌。
 
    管理后台现在可以在用户列表中直接修改角色、下发密码重置、永久禁用/启用、设置临时禁用以及删除用户。对应的 API 包括 `PUT /admin/users/{id}`、`POST /admin/users/{id}/reset-password`、`DELETE /admin/users/{id}`，并仍然遵循“不能禁用/删除自己”与“至少保留一个管理员” 的保护逻辑。
    安装依赖时请确保包含新依赖 `vue-router`（已列入 `package.json`），任何新增依赖都需要重新执行 `npm install`。
 3. 生产环境构建：
    ```bash
-   npm run build
+   VITE_API_BASE=http://xpq.qazwsx123.uk/api npm run build
    ```
-   构建产物位于 `web/frontend/dist/`。
+   构建产物位于 `web/frontend/dist/`，将 `dist/` 内容复制到 nginx 静态根目录（例如 `/var/www/stocktool`），同时确保 nginx 或代理把 `/api/` 请求转发到 `http://127.0.0.1:8000`（保留 `stocktool_session` cookie）。
 
 ## 部署建议
 
-- **后端**：使用 systemd 或其他进程管理器运行 `uvicorn web.backend.main:app --host 0.0.0.0 --port 8000`，开放端口或通过 Nginx 反向代理至域名（支持 HTTPS）。
-- **前端**：将 `dist/` 部署到任意静态站点（Nginx、Cloudflare Pages、GitHub Pages 等）。在 `.env.production` 中配置 API 地址，例如：
-  ```env
-  VITE_API_BASE=https://api.example.com/api
+**后端**：使用 systemd 或其他进程管理器运行 `uvicorn web.backend.main:app --host 0.0.0.0 --port 8000`，并在 service 定义或启动脚本里导出关键环境变量：
+  ```bash
+  export STOCKTOOL_SESSION_SECRET="你自己的随机串"
+  export STOCKTOOL_ALLOW_ORIGINS="http://104.207.154.5,http://xpq.qazwsx123.uk"
+  export STOCKTOOL_SESSION_COOKIE_SECURE=false   # HTTP 时设为 false
+  export STOCKTOOL_SESSION_SAME_SITE=lax
+  export STOCKTOOL_ADMIN_PASSWORD="你想要的强密码"
   ```
-- **Nginx 示例**：
+  设置完成后重启服务（`sudo systemctl daemon-reload && sudo systemctl restart stocktool`），确保 `/me` 能正确读取 session。
+**前端**：将 `dist/` 部署到任意静态站点（Nginx、Cloudflare Pages、GitHub Pages 等），并将 `VITE_API_BASE` 指向部署域名（例如 `VITE_API_BASE=http://xpq.qazwsx123.uk/api`）。构建后的入口会通过 `window.__STOCKTOOL_RUNTIME_API_BASE` 默认指向当前 host 的 `http(s)://<host>:8000/api`，方便直接托管在 nginx 上。
+**Nginx 示例**：
   ```nginx
   server {
       listen 80;
-      server_name example.com;
+      listen [::]:80;
+      server_name xpq.qazwsx123.uk 104.207.154.5;
       root /var/www/stocktool;
       index index.html;
-      location / { try_files $uri $uri/ /index.html; }
+      location / {
+          try_files $uri $uri/ /index.html;
+      }
       location /api/ {
           proxy_pass http://127.0.0.1:8000/;
+          proxy_http_version 1.1;
           proxy_set_header Host $host;
           proxy_set_header X-Real-IP $remote_addr;
           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
           proxy_set_header X-Forwarded-Proto $scheme;
+          proxy_set_header Connection "";
+          proxy_redirect off;
+          proxy_cookie_path / /;
       }
   }
   ```
 
 ## 常见问题
 
-- **上传失败 / Network Error**：确认前端的 `VITE_API_BASE` 指向真实 API 地址，不要保留 `127.0.0.1`。
+- **上传失败 / Network Error**：确认前端的 `VITE_API_BASE` 指向生产 API（不要留 `127.0.0.1`），并用浏览器 DevTools 检查 `/login` 是否返回 `Set-Cookie: stocktool_session`、后续 `/me` 请求是否带上 Cookie 并返回 200；若缺失，检查 nginx 是否把 `/api/` 正确代理至 `http://127.0.0.1:8000`，以及 `STOCKTOOL_ALLOW_ORIGINS` 与 `STOCKTOOL_SESSION_COOKIE_SECURE` 是否与部署协议匹配（HTTP 时设为 `false`）。
 - **500 PermissionError**：给 `web/backend/uploads/` 与 `results/` 目录赋予运行用户写权限。
 - **Git dubiously-owned repository**：在服务器上执行 `git config --global --add safe.directory /opt/StockTool` 解决。
+- **用户数据库 users.db 被覆盖**：`web/backend/users.db` 已列入 `.gitignore`，默认不会被 `git pull`/`git push` 覆盖；如果怕出错，只要不删掉这个文件，它会保留你当前的 admin/用户记录。
 
 欢迎根据业务需求扩展更多策略或可视化模块，贡献 PR！
