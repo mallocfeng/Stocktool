@@ -16,6 +16,8 @@ import requests
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 from backtest_service import BacktestParams, run_backtests, BacktestPayload, BacktestEntry
+from data_loader import load_price_csv
+from formula_engine import TdxFormulaEngine
 from analytics import (
     indicator_scoring,
     atr_based_stop,
@@ -109,6 +111,13 @@ class BacktestRequest(BaseModel):
     initial_capital: float
     fee_rate: float
     strategies: StrategyConfig
+    date_start: Optional[str] = None
+    date_end: Optional[str] = None
+
+
+class FormulaValidateRequest(BaseModel):
+    csv_path: str
+    formula: str
     date_start: Optional[str] = None
     date_end: Optional[str] = None
 
@@ -520,6 +529,44 @@ def api_run_backtest(req: BacktestRequest):
         "logs": logs,
         "entries": serialized_entries
     }
+
+
+@app.post("/formula/validate")
+def api_validate_formula(req: FormulaValidateRequest):
+    logs: List[str] = []
+    try:
+        df = load_price_csv(req.csv_path)
+        required_cols = {"date", "open", "high", "low", "close"}
+        if not required_cols.issubset(df.columns):
+            logs.append(f"ERROR: CSV 至少需要列：{', '.join(required_cols)}")
+            return {"status": "failed", "logs": logs, "buy_count": 0, "sell_count": 0}
+
+        df["date"] = pd.to_datetime(df["date"])
+        if req.date_start or req.date_end:
+            start_ts = pd.to_datetime(req.date_start) if req.date_start else None
+            end_ts = pd.to_datetime(req.date_end) if req.date_end else None
+            mask = pd.Series(True, index=df.index)
+            if start_ts is not None:
+                mask &= df["date"] >= start_ts
+            if end_ts is not None:
+                mask &= df["date"] <= end_ts
+            df = df.loc[mask].copy()
+
+        engine = TdxFormulaEngine(df.copy())
+        buy, sell = engine.run(req.formula)
+        logs.extend(getattr(engine, "logs", []) or [])
+
+        buy_count = int(buy.astype(bool).sum()) if isinstance(buy, pd.Series) else 0
+        sell_count = int(sell.astype(bool).sum()) if isinstance(sell, pd.Series) else 0
+        return {
+            "status": "success",
+            "logs": logs,
+            "buy_count": buy_count,
+            "sell_count": sell_count,
+        }
+    except Exception as e:  # noqa: BLE001
+        logs.append(f"ERROR: {type(e).__name__}: {e}")
+        return {"status": "failed", "logs": logs, "buy_count": 0, "sell_count": 0}
 
 @app.get("/market_data_chart")
 def get_market_data():

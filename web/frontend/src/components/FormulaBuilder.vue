@@ -1,10 +1,13 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue';
+import axios from 'axios';
 import { indicatorBlocks, conditionBlocks } from '../lib/formulaTemplates';
+import TdxCodeEditor from './TdxCodeEditor.vue';
 
 const props = defineProps({
   show: { type: Boolean, default: false },
   initialFormula: { type: String, default: '' },
+  csvPath: { type: String, default: '' },
 });
 
 const emit = defineEmits(['close', 'apply']);
@@ -45,6 +48,9 @@ const builderState = reactive({
   customSellExpr: '',
 });
 
+const validationLogs = ref([]);
+const validationSummary = ref('');
+
 const indicatorSelection = ref(indicatorBlocks[0]?.id || '');
 const buyConditionSelection = ref(conditionBlocks[0]?.id || '');
 const sellConditionSelection = ref(conditionBlocks[0]?.id || '');
@@ -68,6 +74,8 @@ const extractExpr = (raw, key) => {
 
 const hydrateFromFormula = () => {
   resetState();
+  validationLogs.value = [];
+  validationSummary.value = '';
   const raw = props.initialFormula || '';
   if (!raw.trim()) return;
   builderState.customBuyExpr = extractExpr(raw, 'B_COND');
@@ -231,6 +239,34 @@ const copyFormula = async () => {
     setTimeout(() => (copyHint.value = ''), 1800);
   }
 };
+
+const validateFormula = async () => {
+  if (!props.csvPath) {
+    alert('请先上传/选择 CSV 行情数据后再校验公式。');
+    return;
+  }
+  validationSummary.value = '校验中…';
+  validationLogs.value = [];
+  try {
+    const res = await axios.post('/formula/validate', {
+      csv_path: props.csvPath,
+      formula: formulaPreview.value,
+    });
+    const logs = res.data?.logs || [];
+    validationLogs.value = Array.isArray(logs) ? logs : [String(logs)];
+    const buyCount = res.data?.buy_count ?? 0;
+    const sellCount = res.data?.sell_count ?? 0;
+    validationSummary.value = `校验完成：买入信号 ${buyCount}，卖出信号 ${sellCount}`;
+  } catch (e) {
+    validationSummary.value = '校验失败';
+    validationLogs.value = [e.response?.data?.detail || e.message];
+  }
+};
+
+const previewDoc = computed({
+  get: () => formulaPreview.value,
+  set: () => {},
+});
 </script>
 
 <template>
@@ -248,12 +284,11 @@ const copyFormula = async () => {
         <div class="builder-body">
           <section class="builder-section">
             <h4>其他脚本（可选）</h4>
-            <textarea
-              class="code-area tall-textarea"
-              rows="6"
+            <TdxCodeEditor
               v-model="builderState.extraScript"
+              minHeight="180px"
               placeholder="在此粘贴任意赋值语句、函数等。B_COND/S_COND 不必写在这里。"
-            ></textarea>
+            />
           </section>
 
           <section class="builder-section">
@@ -361,12 +396,11 @@ const copyFormula = async () => {
                 <pre class="entry-preview">{{ getConditionPreview(entry) || '（未生成条件表达式）' }}</pre>
               </div>
             </div>
-            <textarea
-              class="code-area stacked-textarea"
-              rows="3"
+            <TdxCodeEditor
               v-model="builderState.customBuyExpr"
+              minHeight="120px"
               placeholder="可选：直接输入完整 B_COND 表达式。若填写，则忽略上方所有条件。"
-            ></textarea>
+            />
           </section>
 
           <section class="builder-section">
@@ -422,21 +456,29 @@ const copyFormula = async () => {
                 <pre class="entry-preview">{{ getConditionPreview(entry) || '（未生成条件表达式）' }}</pre>
               </div>
             </div>
-            <textarea
-              class="code-area stacked-textarea"
-              rows="3"
+            <TdxCodeEditor
               v-model="builderState.customSellExpr"
+              minHeight="120px"
               placeholder="可选：直接输入完整 S_COND 表达式。若填写，则忽略上方所有条件。"
-            ></textarea>
+            />
           </section>
 
           <section class="builder-section preview-section">
             <div class="preview-header">
               <h4>公式预览</h4>
-              <span class="preview-hint">{{ copyHint || '可复制或直接写回配置面板' }}</span>
+              <span class="preview-hint">{{ validationSummary || copyHint || '可复制或直接写回配置面板' }}</span>
             </div>
-            <pre class="formula-preview">{{ formulaPreview }}</pre>
+            <TdxCodeEditor
+              v-model="previewDoc"
+              :lintLogs="validationLogs"
+              minHeight="220px"
+              readOnly
+            />
+            <div v-if="validationLogs.length" class="builder-log">
+              <div v-for="(msg, idx) in validationLogs" :key="idx">{{ msg }}</div>
+            </div>
             <div class="builder-actions">
+              <button type="button" class="secondary" @click="validateFormula">校验</button>
               <button type="button" class="secondary" @click="copyFormula">复制</button>
               <button type="button" class="primary" @click="applyFormula">填入配置</button>
             </div>

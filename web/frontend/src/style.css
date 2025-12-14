@@ -157,6 +157,16 @@ button.secondary {
   border-color: var(--border);
 }
 
+button.secondary.danger {
+  border-color: rgba(239, 68, 68, 0.55);
+  color: rgba(239, 68, 68, 0.95);
+}
+
+button.secondary.danger:hover:not(:disabled) {
+  border-color: rgba(239, 68, 68, 0.9);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.25);
+}
+
 .fetch-online-button {
   background-color: var(--tone-4, var(--accent-secondary));
   color: #fff;
@@ -1764,6 +1774,25 @@ table.modern-table tbody tr:hover {
 .preview-hint {
   font-size: 0.8rem;
   color: var(--text-secondary);
+}
+
+.builder-log,
+.formula-log {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(var(--overlay-rgb), 0.28);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.formula-summary {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
 }
 
 .builder-actions {

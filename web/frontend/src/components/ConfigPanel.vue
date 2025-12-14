@@ -5,6 +5,7 @@ import flatpickr from 'flatpickr';
 import { Mandarin as flatpickrZh } from 'flatpickr/dist/l10n/zh.js';
 import 'flatpickr/dist/themes/dark.css';
 import FormulaBuilder from './FormulaBuilder.vue';
+import TdxCodeEditor from './TdxCodeEditor.vue';
 
 flatpickr.localize(flatpickrZh);
 
@@ -14,6 +15,9 @@ const props = defineProps({
 
 const emit = defineEmits(['run', 'block', 'unblock']);
 let importTicket = 0;
+
+const formulaLintLogs = ref([]);
+const formulaLintSummary = ref('');
 
 const DEFAULT_FORMULA = `SHORT := EMA(CLOSE,12);
 LONG := EMA(CLOSE,26);
@@ -295,12 +299,89 @@ const toggleStrategyDrawer = () => {
   if (opening) scrollToDrawer();
 };
 
-const checkFormula = () => {
-  if (!config.formula || !config.formula.toUpperCase().includes('B_COND')) {
-    alert('公式中必须包含 B_COND := ... 请补充买入条件。');
-  } else {
-    alert('公式已包含 B_COND，可运行回测。');
+const validateFormula = async () => {
+  if (!config.formula || !config.formula.trim()) {
+    alert('请先输入通达信公式。');
+    return;
   }
+  if (!config.csv_path) {
+    alert('请先上传/选择 CSV 行情数据后再校验公式。');
+    return;
+  }
+  formulaLintSummary.value = '校验中…';
+  formulaLintLogs.value = [];
+  try {
+    const res = await axios.post('/formula/validate', {
+      csv_path: config.csv_path,
+      formula: config.formula,
+      date_start: dateRange.start || null,
+      date_end: dateRange.end || null,
+    });
+    const logs = res.data?.logs || [];
+    formulaLintLogs.value = Array.isArray(logs) ? logs : [String(logs)];
+    const buyCount = res.data?.buy_count ?? 0;
+    const sellCount = res.data?.sell_count ?? 0;
+    formulaLintSummary.value = `校验完成：买入信号 ${buyCount}，卖出信号 ${sellCount}`;
+    if (!String(config.formula || '').toUpperCase().includes('B_COND')) {
+      alert('校验完成，但公式中缺少 B_COND（买入条件）。');
+    } else {
+      alert(formulaLintSummary.value);
+    }
+  } catch (e) {
+    formulaLintSummary.value = '校验失败';
+    formulaLintLogs.value = [e.response?.data?.detail || e.message];
+    alert('校验失败：' + (e.response?.data?.detail || e.message));
+  }
+};
+
+const copyTextToClipboard = async (text) => {
+  const raw = String(text ?? '');
+  if (!raw) return false;
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(raw);
+      return true;
+    }
+  } catch {
+    // fallback below
+  }
+  try {
+    if (typeof document === 'undefined') return false;
+    const textarea = document.createElement('textarea');
+    textarea.value = raw;
+    textarea.setAttribute('readonly', 'true');
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-1000px';
+    textarea.style.left = '-1000px';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+    const ok = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    return ok;
+  } catch {
+    return false;
+  }
+};
+
+const clearFormula = async () => {
+  const current = String(config.formula || '');
+  if (!current.trim()) {
+    alert('当前公式为空，无需清空。');
+    return;
+  }
+  const ok = confirm('确认清空当前公式吗？系统会先把原内容复制到剪贴板，方便你随时粘贴恢复。');
+  if (!ok) return;
+  const copied = await copyTextToClipboard(current);
+  if (!copied) {
+    alert('复制到剪贴板失败，为了安全已取消清空。请手动复制后再清空。');
+    return;
+  }
+  config.formula = '';
+  formulaLintLogs.value = [];
+  formulaLintSummary.value = '';
+  alert('已清空公式，原内容已复制到剪贴板。');
 };
 
 const convertFromText = async () => {
@@ -572,10 +653,20 @@ const runBacktest = () => {
 
     <section class="form-section">
       <div class="section-title">通达信公式</div>
-      <textarea v-model="config.formula" rows="6" class="code-area"></textarea>
+      <TdxCodeEditor
+        v-model="config.formula"
+        :lintLogs="formulaLintLogs"
+        minHeight="220px"
+        placeholder="输入通达信公式脚本，例如：B_COND := ...; S_COND := ...;"
+      />
+      <div v-if="formulaLintSummary" class="formula-summary">{{ formulaLintSummary }}</div>
+      <div v-if="formulaLintLogs.length" class="formula-log">
+        <div v-for="(msg, idx) in formulaLintLogs" :key="idx">{{ msg }}</div>
+      </div>
       <div class="button-row">
         <button type="button" class="secondary" @click="builderVisible = true">公式向导</button>
-        <button type="button" class="secondary" @click="checkFormula">检查公式</button>
+        <button type="button" class="secondary" @click="validateFormula">检查公式</button>
+        <button type="button" class="secondary danger" @click="clearFormula">清空公式</button>
         <button type="button" class="secondary" @click="convertFromText">自然语言转公式</button>
       </div>
       <input type="text" class="text-input" placeholder="例如：5日均线金叉20日配合放量" v-model="config.strategy_text" />
@@ -840,6 +931,7 @@ const runBacktest = () => {
   <FormulaBuilder
     :show="builderVisible"
     :initialFormula="config.formula"
+    :csvPath="config.csv_path"
     @close="builderVisible = false"
     @apply="handleApplyFormula"
   />
