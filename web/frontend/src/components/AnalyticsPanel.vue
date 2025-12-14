@@ -163,7 +163,11 @@ const dynamicSummary = computed(() => dynamicEntry.value?.result?.dynamicSummary
 const buyHedgeSummary = computed(() => currentEntry.value?.result?.buyHedgeSummary || null);
 const buyHedgeTrades = computed(() => currentEntry.value?.result?.buyHedgeTrades || []);
 const buyHedgeEvents = computed(() => currentEntry.value?.result?.buyHedgeEvents || []);
-const equityCurveStatic = computed(() => baseStaticEntry.value?.result?.equity_curve || []);
+const equityCurveStatic = computed(() => {
+  const explicitBaseline = dynamicEntry.value?.result?.equityCurveOriginal;
+  if (Array.isArray(explicitBaseline) && explicitBaseline.length) return explicitBaseline;
+  return baseStaticEntry.value?.result?.equity_curve || [];
+});
 const equityCurveDynamic = computed(() => dynamicEntry.value?.result?.equityCurveWithDynamicFund || []);
 const dynamicForceStop = computed(
   () => dynamicEntry.value?.result?.forceStopByDrawdown ?? dynamicEntry.value?.result?.forceStop ?? false
@@ -350,20 +354,26 @@ const renderDynamicEquityChart = () => {
   }
   const staticSeries = equityCurveStatic.value?.map(([ts, val]) => [ts, val]) || [];
   const dynamicSeriesArr = equityCurveDynamic.value?.map(([ts, val]) => [ts, val]) || [];
+  const toMap = (series) => new Map(series.map((item) => [item[0], item[1]]));
+  const staticMap = toMap(staticSeries);
+  const dynamicMap = toMap(dynamicSeriesArr);
+  const dates = Array.from(new Set([...staticMap.keys(), ...dynamicMap.keys()])).sort();
+  const staticValues = dates.map((d) => (staticMap.has(d) ? staticMap.get(d) : null));
+  const dynamicValues = dates.map((d) => (dynamicMap.has(d) ? dynamicMap.get(d) : null));
   dynamicEquityChartInstance.setOption({
     tooltip: { trigger: 'axis' },
     legend: { data: ['原始权益', '动态权益'], bottom: 12 },
     grid: { left: 40, right: 20, top: 20, bottom: 92 },
     xAxis: {
       type: 'category',
-      data: staticSeries.map((item) => item[0]),
+      data: dates,
       boundaryGap: false,
       axisLabel: { margin: 12 },
     },
     yAxis: { type: 'value', scale: true },
     series: [
-      { name: '原始权益', type: 'line', smooth: true, data: staticSeries.map((item) => item[1]) },
-      { name: '动态权益', type: 'line', smooth: true, data: dynamicSeriesArr.map((item) => item[1]) },
+      { name: '原始权益', type: 'line', smooth: true, data: staticValues },
+      { name: '动态权益', type: 'line', smooth: true, data: dynamicValues },
     ],
   });
   dynamicEquityChartInstance.resize();

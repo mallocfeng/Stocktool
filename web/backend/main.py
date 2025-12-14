@@ -425,6 +425,10 @@ def serialize_backtest_result(res) -> Dict:
         dyn_times = res.dynamic_equity_curve.index.astype(str).tolist()
         dyn_values = res.dynamic_equity_curve.values.tolist()
         payload["equityCurveWithDynamicFund"] = list(zip(dyn_times, dyn_values))
+    if getattr(res, "baseline_equity_curve", None) is not None:
+        base_times = res.baseline_equity_curve.index.astype(str).tolist()
+        base_values = res.baseline_equity_curve.values.tolist()
+        payload["equityCurveOriginal"] = list(zip(base_times, base_values))
     if getattr(res, "investment_curve_main", None):
         payload["investmentCurveMain"] = res.investment_curve_main
         payload["investmentAmount"] = res.investment_curve_main  # backward compatibility

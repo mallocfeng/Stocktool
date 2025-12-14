@@ -37,6 +37,7 @@ class BacktestResult:
     avg_win: float
     avg_loss: float
     dynamic_equity_curve: Optional[pd.Series] = None
+    baseline_equity_curve: Optional[pd.Series] = None
     investment_curve_main: Optional[List[List[Any]]] = None
     investment_curve_hedge: Optional[List[List[Any]]] = None
     max_loss_streak_used: Optional[int] = None
@@ -386,6 +387,7 @@ def backtest_dynamic_capital(
     close = df["close"]
     idx = df.index
     equity = pd.Series(index=idx, dtype=float)
+    baseline_equity = pd.Series(index=idx, dtype=float)
 
     def _to_float(value, default=0.0):
         if value is None:
@@ -470,6 +472,13 @@ def backtest_dynamic_capital(
     pending_exit = False
     pending_exit_reason = ""
 
+    baseline_cash = float(initial_capital)
+    baseline_position = 0
+    baseline_entry_price = 0.0
+    baseline_entry_idx: Optional[int] = None
+    baseline_t1_guard = TPlusOneGuard()
+    baseline_pending_exit = False
+
     def clamp_amount(value: float) -> float:
         if max_limit > 0:
             return min(value, max_limit)
@@ -487,6 +496,33 @@ def backtest_dynamic_capital(
 
     for i, date in enumerate(idx):
         price = float(close.iloc[i])
+
+        if baseline_position == 0:
+            if buy.iloc[i]:
+                buy_cash = baseline_cash * (1 - fee_rate)
+                baseline_position = floor_lot(int(buy_cash // price))
+                if baseline_position > 0:
+                    cost = baseline_position * price
+                    fee = cost * fee_rate
+                    baseline_cash -= cost + fee
+                    baseline_entry_price = price
+                    baseline_entry_idx = i
+                    baseline_t1_guard.add(date, baseline_position)
+                    baseline_pending_exit = False
+        else:
+            should_exit = baseline_pending_exit or bool(sell.iloc[i])
+            if should_exit:
+                if not baseline_t1_guard.can_sell(date, baseline_position):
+                    baseline_pending_exit = True
+                else:
+                    baseline_t1_guard.consume(date, baseline_position)
+                    value = baseline_position * price
+                    fee = value * fee_rate
+                    baseline_cash += value - fee
+                    baseline_position = 0
+                    baseline_entry_price = 0.0
+                    baseline_entry_idx = None
+                    baseline_pending_exit = False
 
         if position == 0 and buy.iloc[i]:
             base_budget = clamp_amount(next_amount_main if not force_stop else initial_investment)
@@ -675,6 +711,7 @@ def backtest_dynamic_capital(
 
         equity_value = cash_main + position * price + hedge_cash - hedge_position * price
         equity.iloc[i] = equity_value
+        baseline_equity.iloc[i] = baseline_cash + baseline_position * price
         if equity_value > peak_equity:
             peak_equity = equity_value
         drawdown_value = peak_equity - equity_value
@@ -760,9 +797,11 @@ def backtest_dynamic_capital(
 
     final_price = float(close.iloc[-1])
     equity.iloc[-1] = cash_main + position * final_price + hedge_cash - hedge_position * final_price
+    baseline_equity.iloc[-1] = baseline_cash + baseline_position * final_price
 
     result = _calc_stats(equity, trades)
     result.dynamic_equity_curve = equity
+    result.baseline_equity_curve = baseline_equity
     result.investment_curve_main = investment_series or None
     result.investment_curve_hedge = hedge_invest_series or None
     result.dynamic_force_stop = force_stop
