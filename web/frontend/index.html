@@ -8,6 +8,18 @@
   </head>
   <body>
     <div id="app"></div>
+    <script>
+      (function () {
+        if (window.__STOCKTOOL_RUNTIME_API_BASE) {
+          return;
+        }
+        const protocol = window.location.protocol;
+        const hostname = window.location.hostname;
+        const backendPort = window.__STOCKTOOL_API_PORT || "8000";
+        const portSegment = backendPort ? `:${backendPort}` : "";
+        window.__STOCKTOOL_RUNTIME_API_BASE = `${protocol}//${hostname}${portSegment}/api`;
+      })();
+    </script>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

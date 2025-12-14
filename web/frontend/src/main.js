@@ -4,7 +4,9 @@ import './style.css'
 import App from './App.vue'
 import router from './router'
 
-const apiBase = import.meta.env.VITE_API_BASE?.replace(/\/$/, '') || '/api'
+const envApiBase = import.meta.env.VITE_API_BASE?.replace(/\/$/, '')
+const runtimeApiBase = window.__STOCKTOOL_RUNTIME_API_BASE?.replace(/\/$/, '')
+const apiBase = envApiBase || runtimeApiBase || '/api'
 axios.defaults.baseURL = apiBase
 axios.defaults.withCredentials = true
 
