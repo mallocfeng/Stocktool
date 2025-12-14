@@ -38,6 +38,9 @@
   --tone-6-rgb: 52, 211, 153;
   --tip-bg-gradient: linear-gradient(125deg, rgba(var(--tone-1-rgb), 0.16), rgba(var(--tone-4-rgb), 0.05));
   --tip-border: rgba(var(--tone-1-rgb), 0.45);
+  --tip-close-bg: rgba(15, 23, 42, 0.16);
+  --tip-close-color: rgba(148, 163, 184, 0.9);
+  --tip-close-hover: rgba(15, 23, 42, 0.3);
 }
 
 :root[data-theme='light'] {
@@ -80,6 +83,9 @@
   --tone-6-rgb: 5, 150, 105;
   --tip-bg-gradient: linear-gradient(125deg, rgba(250, 204, 21, 0.25), rgba(253, 186, 116, 0.1));
   --tip-border: rgba(245, 158, 11, 0.45);
+  --tip-close-bg: rgba(107, 76, 9, 0.12);
+  --tip-close-color: rgba(107, 76, 9, 0.9);
+  --tip-close-hover: rgba(107, 76, 9, 0.25);
 }
 
 :root[data-theme='morandi'] {
@@ -122,6 +128,9 @@
   --tone-6-rgb: 138, 166, 140;
   --tip-bg-gradient: linear-gradient(125deg, rgba(255, 235, 205, 0.35), rgba(232, 197, 169, 0.15));
   --tip-border: rgba(210, 148, 140, 0.65);
+  --tip-close-bg: rgba(76, 61, 51, 0.12);
+  --tip-close-color: rgba(76, 61, 51, 0.9);
+  --tip-close-hover: rgba(76, 61, 51, 0.25);
 }
 
 body {
@@ -360,8 +369,8 @@ label {
 
 .tip-close {
   border: none;
-  background: rgba(var(--overlay-rgb), 0.08);
-  color: var(--text-secondary);
+  background: var(--tip-close-bg);
+  color: var(--tip-close-color);
   padding: 0.35rem 0.8rem;
   border-radius: 999px;
   font-size: 0.85rem;
@@ -370,7 +379,7 @@ label {
 }
 
 .tip-close:hover {
-  background: rgba(var(--overlay-rgb), 0.18);
+  background: var(--tip-close-hover);
   color: var(--text-primary);
 }
 
