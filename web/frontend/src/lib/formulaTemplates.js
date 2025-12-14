@@ -138,14 +138,14 @@ export const conditionBlocks = [
   {
     id: 'compare',
     label: '数值比较',
-    description: '左侧与右侧进行比较，如 C > MA(CLOSE,5)',
+    description: '左侧与右侧进行比较，如 CLOSE > MA(CLOSE,5)',
     fields: [
-      { key: 'left', label: '左侧表达式', type: 'text', default: 'C' },
+      { key: 'left', label: '左侧表达式', type: 'text', default: 'CLOSE' },
       { key: 'operator', label: '比较符', type: 'select', options: OPERATOR_OPTIONS, default: '>' },
       { key: 'right', label: '右侧表达式', type: 'text', default: 'MA(CLOSE,5)' },
     ],
     build: (values) => {
-      const left = values.left?.trim() || 'C';
+      const left = values.left?.trim() || 'CLOSE';
       const operator = values.operator || '>';
       const right = values.right?.trim() || 'MA(CLOSE,5)';
       return `${left} ${operator} ${right}`;
@@ -156,12 +156,12 @@ export const conditionBlocks = [
     label: '区间判断',
     description: '判断表达式是否位于区间内',
     fields: [
-      { key: 'expr', label: '表达式', type: 'text', default: 'C' },
+      { key: 'expr', label: '表达式', type: 'text', default: 'CLOSE' },
       { key: 'min', label: '下限', type: 'text', default: 'MA(CLOSE,34)' },
       { key: 'max', label: '上限', type: 'text', default: 'MA(CLOSE,5)' },
     ],
     build: (values) => {
-      const expr = values.expr?.trim() || 'C';
+      const expr = values.expr?.trim() || 'CLOSE';
       const min = values.min?.trim() || 'MA(CLOSE,34)';
       const max = values.max?.trim() || 'MA(CLOSE,5)';
       return `${min} < ${expr} AND ${expr} < ${max}`;
@@ -172,12 +172,12 @@ export const conditionBlocks = [
     label: '与历史比较',
     description: '表达式与 REF(expr, N) 比较，可用于“上涨/回落”',
     fields: [
-      { key: 'expr', label: '表达式', type: 'text', default: 'C' },
+      { key: 'expr', label: '表达式', type: 'text', default: 'CLOSE' },
       { key: 'operator', label: '比较符', type: 'select', options: OPERATOR_OPTIONS, default: '>' },
       { key: 'bars', label: '对比周期', type: 'number', min: 1, default: 1 },
     ],
     build: (values) => {
-      const expr = values.expr?.trim() || 'C';
+      const expr = values.expr?.trim() || 'CLOSE';
       const operator = values.operator || '>';
       const bars = ensurePositiveInt(values.bars, 1);
       return `${expr} ${operator} REF(${expr},${bars})`;

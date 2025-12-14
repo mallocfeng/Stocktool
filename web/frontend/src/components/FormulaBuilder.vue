@@ -51,6 +51,27 @@ const builderState = reactive({
 const validationLogs = ref([]);
 const validationSummary = ref('');
 
+const explainExprShorthand = (raw) => {
+  const token = String(raw || '').trim().toUpperCase();
+  const map = {
+    C: 'C = 收盘价（等同 CLOSE）',
+    O: 'O = 开盘价（等同 OPEN）',
+    H: 'H = 最高价（等同 HIGH）',
+    L: 'L = 最低价（等同 LOW）',
+    V: 'V = 成交量（等同 VOL）',
+  };
+  return map[token] || '';
+};
+
+const isExpressionField = (field) =>
+  field?.type === 'text' &&
+  ['left', 'right', 'expr', 'min', 'max', 'fast', 'slow'].includes(field.key);
+
+const dynamicFieldHint = (field, value) => {
+  if (!isExpressionField(field)) return '';
+  return explainExprShorthand(value);
+};
+
 const indicatorSelection = ref(indicatorBlocks[0]?.id || '');
 const buyConditionSelection = ref(conditionBlocks[0]?.id || '');
 const sellConditionSelection = ref(conditionBlocks[0]?.id || '');
@@ -336,6 +357,9 @@ const previewDoc = computed({
                       />
                     </template>
                     <small v-if="field.hint" class="field-hint">{{ field.hint }}</small>
+                    <small v-if="dynamicFieldHint(field, entry.values[field.key])" class="field-hint">
+                      {{ dynamicFieldHint(field, entry.values[field.key]) }}
+                    </small>
                   </div>
                 </div>
                 <pre class="entry-preview">{{ getIndicatorPreview(entry) || '（暂无输出）' }}</pre>
@@ -391,6 +415,9 @@ const previewDoc = computed({
                       />
                     </template>
                     <small v-if="field.hint" class="field-hint">{{ field.hint }}</small>
+                    <small v-if="dynamicFieldHint(field, entry.values[field.key])" class="field-hint">
+                      {{ dynamicFieldHint(field, entry.values[field.key]) }}
+                    </small>
                   </div>
                 </div>
                 <pre class="entry-preview">{{ getConditionPreview(entry) || '（未生成条件表达式）' }}</pre>
@@ -451,6 +478,9 @@ const previewDoc = computed({
                       />
                     </template>
                     <small v-if="field.hint" class="field-hint">{{ field.hint }}</small>
+                    <small v-if="dynamicFieldHint(field, entry.values[field.key])" class="field-hint">
+                      {{ dynamicFieldHint(field, entry.values[field.key]) }}
+                    </small>
                   </div>
                 </div>
                 <pre class="entry-preview">{{ getConditionPreview(entry) || '（未生成条件表达式）' }}</pre>
