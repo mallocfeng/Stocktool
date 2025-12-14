@@ -43,6 +43,15 @@ StockTool/
    ```
 4. 上传接口将 CSV 保存到 `web/backend/uploads/`，回测结果写入 `results/`，确保这些目录可写。
 
+#### 认证与用户管理
+
+- 新增基于 Session 的登录 `/login`, `/logout`, `/me`，客户端通过 HttpOnly 的 Session Cookie 与服务端保持状态。
+- 管理用户的 API 统一放在 `/admin/users` 及其相关子路由，管理员必须具有 `role = admin`。
+- 密码使用 Argon2id（添加 `argon2-cffi` 依赖）；如果数据库尚无用户，服务会根据 `STOCKTOOL_ADMIN_USERNAME` / `STOCKTOOL_ADMIN_PASSWORD` 自动创建管理员账号（未设置时回退为 `admin`/`admin` 并打印警告，请立即修改）。
+- 推荐设置环境变量 `STOCKTOOL_SESSION_SECRET` 来签名 Cookie，并根据部署协议调整 `STOCKTOOL_SESSION_COOKIE_SECURE`（默认 `false`，HTTPS 环境务必开启）、`STOCKTOOL_SESSION_SAME_SITE` 与 `STOCKTOOL_SESSION_MAX_AGE`，以配合你的部署需求。
+- 如果前后端部署在不同的主机/端口，请通过 `STOCKTOOL_ALLOW_ORIGINS`（逗号分隔）或 `STOCKTOOL_ALLOW_ORIGIN_REGEX` 设置允许发送 Cookies 的来源；默认 regex (`^https?://.*$`) 允许任何 IP/域名提交，生产环境建议根据需要收紧。
+- 如果前后端部署在不同的主机/端口，请通过 `STOCKTOOL_ALLOW_ORIGINS` 列表（逗号分隔）指定允许发送 Cookies 的域名；默认允许 `localhost`/`127.0.0.1` 上的 Vite 端口（5173、4173、3000）。
+
 ### 前端（Vue 3 + Vite）
 
 1. 安装依赖并启动开发服务器：
@@ -51,10 +60,11 @@ StockTool/
    npm install
    npm run dev -- --host 0.0.0.0
    ```
-2. 默认通过 `axios.defaults.baseURL` 调用 `VITE_API_BASE`。本地可以在 `web/frontend/.env.development` 中设置：
-   ```env
-   VITE_API_BASE=http://127.0.0.1:8000
-   ```
+2. 默认通过 `axios.defaults.baseURL` 调用 `VITE_API_BASE`（未设置时退回到 `/api`）。Vite 的 dev server 已配置 `server.proxy` 把 `/api/*` 代理到本地 FastAPI（`http://127.0.0.1:8000`），因此在开发模式下前后端同源、Session Cookie 会自动携带。如果部署在其它域名或网关后面，只需把 `VITE_API_BASE` 设置为完整的后端地址即可。
+   当前前端已经引入 Vue Router 构建多页面体验：`/login` 展示登录表单，`/register` 提供自助注册，登录后 `/` 展示回测主界面，管理员用户可在顶部点击跳转 `/admin` 管理账号。Axios 默认会设置 `withCredentials = true`，所有认证信息由 HttpOnly Cookie 保存，不要在客户端存储令牌。
+
+   管理后台现在可以在用户列表中直接修改角色、下发密码重置、永久禁用/启用、设置临时禁用以及删除用户。对应的 API 包括 `PUT /admin/users/{id}`、`POST /admin/users/{id}/reset-password`、`DELETE /admin/users/{id}`，并仍然遵循“不能禁用/删除自己”与“至少保留一个管理员” 的保护逻辑。
+   安装依赖时请确保包含新依赖 `vue-router`（已列入 `package.json`），任何新增依赖都需要重新执行 `npm install`。
 3. 生产环境构建：
    ```bash
    npm run build

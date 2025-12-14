@@ -4,13 +4,19 @@ import shutil
 import json
 import time
 import hashlib
-from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, UploadFile, File, HTTPException, Body, WebSocket
+import sqlite3
+from datetime import datetime
+from typing import List, Optional, Dict, Any, Generator
+from fastapi import FastAPI, UploadFile, File, HTTPException, Body, WebSocket, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 from pydantic import BaseModel
 import pandas as pd
 import numpy as np
 import requests
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
+from argon2.low_level import Type
 
 # Add project root to sys.path to import existing modules
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
@@ -73,14 +79,58 @@ AI_MODEL_EXTRACT = AI_CONFIG["model_extract"]
 AI_API_KEY = AI_CONFIG["api_key"]
 AI_TIMEOUT = AI_CONFIG["timeout"]
 
+BACKEND_ROOT = os.path.dirname(__file__)
+USER_DB_PATH = os.path.join(BACKEND_ROOT, "users.db")
+SESSION_SECRET = os.environ.get("STOCKTOOL_SESSION_SECRET", "stocktool-session-secret")
+SESSION_COOKIE_SECURE = os.environ.get("STOCKTOOL_SESSION_COOKIE_SECURE", "false").lower() in ("1", "true", "yes")
+SESSION_SAME_SITE = os.environ.get("STOCKTOOL_SESSION_SAME_SITE", "lax").lower()
+if SESSION_SAME_SITE not in {"lax", "strict", "none"}:
+    SESSION_SAME_SITE = "lax"
+SESSION_MAX_AGE = int(os.environ.get("STOCKTOOL_SESSION_MAX_AGE", str(7 * 24 * 3600)))
+PASSWORD_HASHER = PasswordHasher(time_cost=2, memory_cost=102400, parallelism=8, hash_len=32, type=Type.ID)
+
+if SESSION_SECRET == "stocktool-session-secret":
+    print("WARNING: using default session secret; set STOCKTOOL_SESSION_SECRET for production safety")
+
+DEFAULT_ALLOW_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+allow_origins_env = os.environ.get("STOCKTOOL_ALLOW_ORIGINS")
+ALLOW_ORIGINS = (
+    [origin.strip() for origin in allow_origins_env.split(",") if origin.strip()]
+    if allow_origins_env
+    else DEFAULT_ALLOW_ORIGINS
+)
+# Default to permissive regex so any client IP can submit requests when credentials are needed.
+# Use STOCKTOOL_ALLOW_ORIGIN_REGEX to tighten this in production.
+allow_origin_regex = os.environ.get(
+    "STOCKTOOL_ALLOW_ORIGIN_REGEX",
+    r"^https?://.*$",
+)
+
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOW_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_origin_regex=allow_origin_regex,
+)
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET,
+    session_cookie="stocktool_session",
+    max_age=SESSION_MAX_AGE,
+    same_site=SESSION_SAME_SITE,
+    https_only=SESSION_COOKIE_SECURE,
 )
 
 # --- State Management (Single User) ---
@@ -94,6 +144,122 @@ class AppState:
     ai_cache: Optional[Dict[str, Any]] = None
 
 state = AppState()
+
+# --- Authentication helpers ---
+
+def get_db() -> Generator[sqlite3.Connection, None, None]:
+    conn = sqlite3.connect(USER_DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def _parse_iso_datetime(value: Optional[str], field_name: str = "datetime") -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"{field_name} 格式非法，需为 ISO 8601") from exc
+
+
+def _serialize_datetime(value: Optional[datetime]) -> Optional[str]:
+    if not value:
+        return None
+    return value.replace(microsecond=0).isoformat()
+
+
+def _row_to_user(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "username": row["username"],
+        "role": row["role"],
+        "is_active": bool(row["is_active"]),
+        "disabled_until": row["disabled_until"],
+        "created_at": row["created_at"],
+    }
+
+
+def _ensure_users_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            disabled_until TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+
+
+def _hash_password(raw: str) -> str:
+    if not raw:
+        raise ValueError("密码不能为空")
+    return PASSWORD_HASHER.hash(raw)
+
+
+def _create_user_record(
+    conn: sqlite3.Connection,
+    username: str,
+    password: str,
+    role: str = "user",
+    is_active: bool = True,
+    disabled_until: Optional[str] = None,
+) -> Dict[str, Any]:
+    now_iso = datetime.utcnow().replace(microsecond=0).isoformat()
+    password_hash = _hash_password(password)
+    conn.execute(
+        """
+        INSERT INTO users (username, password_hash, role, is_active, disabled_until, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (username, password_hash, role, 1 if is_active else 0, disabled_until, now_iso),
+    )
+    conn.commit()
+    user_row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+    return _row_to_user(user_row)
+
+
+def _active_admin_count(conn: sqlite3.Connection, exclude_id: Optional[int] = None) -> int:
+    sql = "SELECT COUNT(1) AS cnt FROM users WHERE role = 'admin' AND is_active = 1"
+    params: List[Any] = []
+    if exclude_id:
+        sql += " AND id != ?"
+        params.append(exclude_id)
+    row = conn.execute(sql, params).fetchone()
+    return int(row["cnt"]) if row else 0
+
+
+def init_user_store() -> None:
+    os.makedirs(BACKEND_ROOT, exist_ok=True)
+    with sqlite3.connect(USER_DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        _ensure_users_table(conn)
+        has_any = conn.execute("SELECT COUNT(1) AS cnt FROM users").fetchone() or {"cnt": 0}
+        if has_any["cnt"]:
+            return
+        admin_username = os.environ.get("STOCKTOOL_ADMIN_USERNAME", "admin")
+        admin_password = os.environ.get("STOCKTOOL_ADMIN_PASSWORD")
+        if not admin_password:
+            admin_password = "admin"
+            print(
+                "WARNING: STOCKTOOL_ADMIN_PASSWORD 未设置，已自动创建用户名 admin 密码 admin，请尽快修改",
+            )
+        _create_user_record(conn, admin_username, admin_password, role="admin", is_active=True)
+
+
+@app.on_event("startup")
+def _startup_user_store():
+    init_user_store()
 
 # --- Models ---
 
@@ -155,6 +321,47 @@ MultiTimeframeRequest.model_rebuild()
 
 class ReportRequest(BaseModel):
     strategy_index: int = 0
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class UserSummary(BaseModel):
+    id: int
+    username: str
+    role: str
+    is_active: bool
+    disabled_until: Optional[str] = None
+    created_at: str
+
+class AdminCreateUserRequest(BaseModel):
+    username: str
+    password: str
+    role: str = "user"
+    is_active: bool = True
+    disabled_until: Optional[str] = None
+
+class AdminUpdateUserRequest(BaseModel):
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+    disabled_until: Optional[str] = None
+
+class TemporaryDisableRequest(BaseModel):
+    disabled_until: str
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+
+
+class AdminResetPasswordRequest(BaseModel):
+    password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 # --- External Data Helpers ---
 
@@ -262,6 +469,259 @@ async def noop_ws(socket: WebSocket):
     """Accept and immediately close stray websocket requests (e.g. from dev tooling)."""
     await socket.accept()
     await socket.close()
+
+# --- Authentication dependencies & endpoints ---
+
+def _ensure_user_active(user: Dict[str, Any]) -> None:
+    if not user["is_active"]:
+        raise HTTPException(status_code=403, detail="账户已被禁用")
+    disabled_until = _parse_iso_datetime(user["disabled_until"])
+    if disabled_until and disabled_until > datetime.utcnow():
+        raise HTTPException(
+            status_code=403,
+            detail=f"账户临时禁用至 {disabled_until.strftime('%Y-%m-%d %H:%M:%S')}",
+        )
+
+
+def get_current_user(request: Request, db: sqlite3.Connection = Depends(get_db)) -> UserSummary:
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="未登录")
+    row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not row:
+        request.session.clear()
+        raise HTTPException(status_code=401, detail="用户不存在")
+    user = _row_to_user(row)
+    if not user:
+        raise HTTPException(status_code=401, detail="用户信息异常")
+    _ensure_user_active(user)
+    return UserSummary(**user)
+
+
+def require_role(role: str):
+    def _dependency(user: UserSummary = Depends(get_current_user)) -> UserSummary:
+        if user.role != role:
+            raise HTTPException(status_code=403, detail="权限不足")
+        return user
+
+    return _dependency
+
+
+@app.post("/register", response_model=UserSummary)
+def register(payload: RegisterRequest, db: sqlite3.Connection = Depends(get_db)):
+    username = (payload.username or "").strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="用户名不能为空")
+    password = payload.password or ""
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="密码至少需要 6 个字符")
+    if db.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone():
+        raise HTTPException(status_code=400, detail="用户名已存在")
+    user = _create_user_record(db, username, password, role="user", is_active=True)
+    return UserSummary(**user)
+
+
+@app.post("/login", response_model=UserSummary)
+def login(payload: LoginRequest, request: Request, db: sqlite3.Connection = Depends(get_db)):
+    row = db.execute("SELECT * FROM users WHERE username = ?", (payload.username,)).fetchone()
+    if not row:
+        time.sleep(0.3)
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    user = _row_to_user(row)
+    if not user:
+        raise HTTPException(status_code=401, detail="用户信息异常")
+    if not user["is_active"]:
+        raise HTTPException(status_code=403, detail="账户已被禁用")
+    disabled_until = _parse_iso_datetime(user["disabled_until"])
+    if disabled_until and disabled_until > datetime.utcnow():
+        raise HTTPException(
+            status_code=403,
+            detail=f"账户临时禁用至 {disabled_until.strftime('%Y-%m-%d %H:%M:%S')}",
+        )
+    try:
+        PASSWORD_HASHER.verify(row["password_hash"], payload.password)
+    except VerifyMismatchError:
+        time.sleep(0.3)
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    except Exception:
+        time.sleep(0.3)
+        raise HTTPException(status_code=401, detail="认证失败")
+
+    if PASSWORD_HASHER.check_needs_rehash(row["password_hash"]):
+        new_hash = PASSWORD_HASHER.hash(payload.password)
+        db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, row["id"]))
+        db.commit()
+
+    request.session.clear()
+    request.session["user_id"] = row["id"]
+    request.session["role"] = row["role"]
+    return UserSummary(**_row_to_user(row))
+
+
+@app.post("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return {"status": "ok"}
+
+
+@app.get("/me", response_model=UserSummary)
+def read_me(current_user: UserSummary = Depends(get_current_user)):
+    return current_user
+
+
+@app.post("/me/change-password")
+def change_password_for_current_user(
+    payload: ChangePasswordRequest,
+    current_user: UserSummary = Depends(get_current_user),
+    db: sqlite3.Connection = Depends(get_db),
+):
+    current_password = payload.current_password or ""
+    new_password = payload.new_password or ""
+    if not current_password:
+        raise HTTPException(status_code=400, detail="当前密码不能为空")
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="新密码至少需要 6 个字符")
+    row = db.execute("SELECT * FROM users WHERE id = ?", (current_user.id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    try:
+        PASSWORD_HASHER.verify(row["password_hash"], current_password)
+    except VerifyMismatchError:
+        raise HTTPException(status_code=403, detail="当前密码不正确")
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"当前密码校验失败：{exc}") from exc
+    db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (_hash_password(new_password), current_user.id))
+    db.commit()
+    return {"status": "ok"}
+
+
+@app.get("/admin/users", response_model=List[UserSummary])
+def list_users(current_user: UserSummary = Depends(require_role("admin")), db: sqlite3.Connection = Depends(get_db)):
+    rows = db.execute("SELECT * FROM users ORDER BY created_at DESC").fetchall()
+    return [UserSummary(**_row_to_user(row)) for row in rows if row]
+
+
+@app.post("/admin/users", response_model=UserSummary)
+def create_user(payload: AdminCreateUserRequest, current_user: UserSummary = Depends(require_role("admin")), db: sqlite3.Connection = Depends(get_db)):
+    if db.execute("SELECT 1 FROM users WHERE username = ?", (payload.username,)).fetchone():
+        raise HTTPException(status_code=400, detail="用户名已存在")
+    disabled_until = None
+    if payload.disabled_until:
+        disabled_until = _serialize_datetime(_parse_iso_datetime(payload.disabled_until, field_name="disabled_until"))
+    return UserSummary(**_create_user_record(db, payload.username, payload.password, payload.role, payload.is_active, disabled_until))
+
+
+def _update_user_state(conn: sqlite3.Connection, user_id: int, updates: Dict[str, Any]) -> Dict[str, Any]:
+    if not updates:
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        return _row_to_user(row)
+    setters = ", ".join(f"{col} = ?" for col in updates.keys())
+    params = list(updates.values()) + [user_id]
+    conn.execute(f"UPDATE users SET {setters} WHERE id = ?", params)
+    conn.commit()
+    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return _row_to_user(row)
+
+
+@app.put("/admin/users/{user_id}", response_model=UserSummary)
+def update_user(user_id: int, payload: AdminUpdateUserRequest, current_user: UserSummary = Depends(require_role("admin")), db: sqlite3.Connection = Depends(get_db)):
+    row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if current_user.id == user_id and payload.is_active is False:
+        raise HTTPException(status_code=400, detail="不能禁用自己")
+    updates: Dict[str, Any] = {}
+    was_admin_active = row["role"] == "admin" and bool(row["is_active"])
+    new_role = row["role"]
+    new_is_active = bool(row["is_active"])
+    if payload.role is not None:
+        updates["role"] = payload.role
+        new_role = payload.role
+    if payload.is_active is not None:
+        updates["is_active"] = 1 if payload.is_active else 0
+        new_is_active = payload.is_active
+    if payload.disabled_until is not None:
+        if payload.disabled_until == "":
+            updates["disabled_until"] = None
+        else:
+            parsed = _parse_iso_datetime(payload.disabled_until, field_name="disabled_until")
+            updates["disabled_until"] = _serialize_datetime(parsed)
+    # Prevent removing the last active admin
+    if was_admin_active and (not new_is_active or new_role != "admin"):
+        other_admins = _active_admin_count(db, exclude_id=user_id)
+        if other_admins == 0:
+            raise HTTPException(status_code=400, detail="至少需要一个管理员账号")
+    user = _update_user_state(db, user_id, updates)
+    if not user:
+        raise HTTPException(status_code=500, detail="更新失败")
+    return UserSummary(**user)
+
+
+@app.post("/admin/users/{user_id}/disable")
+def disable_user(user_id: int, current_user: UserSummary = Depends(require_role("admin")), db: sqlite3.Connection = Depends(get_db)):
+    if current_user.id == user_id:
+        raise HTTPException(status_code=400, detail="不能禁用自己")
+    row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if row["role"] == "admin":
+        other_admins = _active_admin_count(db, exclude_id=user_id)
+        if other_admins == 0:
+            raise HTTPException(status_code=400, detail="至少需要一个管理员账号")
+    db.execute("UPDATE users SET is_active = 0, disabled_until = NULL WHERE id = ?", (user_id,))
+    db.commit()
+    return {"status": "ok"}
+
+
+@app.post("/admin/users/{user_id}/disable-temporary")
+def disable_user_temporarily(user_id: int, payload: TemporaryDisableRequest, current_user: UserSummary = Depends(require_role("admin")), db: sqlite3.Connection = Depends(get_db)):
+    if current_user.id == user_id:
+        raise HTTPException(status_code=400, detail="不能禁用自己")
+    parsed = _parse_iso_datetime(payload.disabled_until, field_name="disabled_until")
+    db.execute(
+        "UPDATE users SET disabled_until = ?, is_active = 1 WHERE id = ?",
+        (_serialize_datetime(parsed), user_id),
+    )
+    db.commit()
+    return {"status": "ok"}
+
+
+@app.post("/admin/users/{user_id}/enable")
+def enable_user(user_id: int, current_user: UserSummary = Depends(require_role("admin")), db: sqlite3.Connection = Depends(get_db)):
+    row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    db.execute("UPDATE users SET is_active = 1, disabled_until = NULL WHERE id = ?", (user_id,))
+    db.commit()
+    return {"status": "ok"}
+
+
+@app.post("/admin/users/{user_id}/reset-password")
+def reset_user_password(user_id: int, payload: AdminResetPasswordRequest, current_user: UserSummary = Depends(require_role("admin")), db: sqlite3.Connection = Depends(get_db)):
+    if len(payload.password or "") < 6:
+        raise HTTPException(status_code=400, detail="密码至少需要 6 个字符")
+    row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (_hash_password(payload.password), user_id))
+    db.commit()
+    return {"status": "ok"}
+
+
+@app.delete("/admin/users/{user_id}")
+def delete_user(user_id: int, current_user: UserSummary = Depends(require_role("admin")), db: sqlite3.Connection = Depends(get_db)):
+    if current_user.id == user_id:
+        raise HTTPException(status_code=400, detail="不能删除自己")
+    row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if row["role"] == "admin":
+        other_admins = _active_admin_count(db, exclude_id=user_id)
+        if other_admins == 0:
+            raise HTTPException(status_code=400, detail="删除前请先保留至少一名管理员")
+    db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    db.commit()
+    return {"status": "ok"}
 
 # --- Endpoints ---
 
