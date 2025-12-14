@@ -15,6 +15,7 @@ const props = defineProps({
 const chartContainer = ref(null);
 let chartInstance = null;
 let resizeObserver = null;
+let klineRawCache = [];
 
 const hasKlineData = computed(() => Array.isArray(props.marketData?.kline) && props.marketData.kline.length > 0);
 const themeClass = computed(() => `theme-${props.theme || 'dark'}`);
@@ -33,6 +34,10 @@ const formatTooltipValue = (val) => {
   if (!Number.isFinite(num)) return val ?? '--';
   return num.toFixed(2);
 };
+const toNumber = (value) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
 
 const buildOption = () => {
   const tooltipFormatter = (params = []) => {
@@ -42,7 +47,11 @@ const buildOption = () => {
     if (axisLabel) lines.push(axisLabel);
     params.forEach((item) => {
       if (item.seriesType === 'candlestick') {
-        const [openVal, closeVal, lowVal, highVal] = item.data || [];
+        const raw = klineRawCache[item.dataIndex] || {};
+        const openVal = raw.open ?? item.value?.[0];
+        const closeVal = raw.close ?? item.value?.[1];
+        const lowVal = raw.low ?? item.value?.[2];
+        const highVal = raw.high ?? item.value?.[3];
         lines.push(`${item.marker} ${item.seriesName}`);
         lines.push(`&nbsp;&nbsp;开盘：${formatTooltipValue(openVal)}`);
         lines.push(`&nbsp;&nbsp;收盘：${formatTooltipValue(closeVal)}`);
@@ -169,7 +178,14 @@ const initChart = () => {
 const updateChart = () => {
   if (!chartInstance || !props.marketData || !props.marketData.kline) return;
   const { kline, buy_signals = [], sell_signals = [] } = props.marketData;
-  const klineData = kline.map((item) => [item.open, item.close, item.low, item.high]);
+  klineRawCache = kline.map((item) => ({
+    date: item.date,
+    open: toNumber(item.open),
+    close: toNumber(item.close),
+    low: toNumber(item.low),
+    high: toNumber(item.high),
+  }));
+  const klineData = klineRawCache.map((item) => [item.open, item.close, item.low, item.high]);
   const dates = kline.map((item) => item.date);
   const dateIndex = new Map(dates.map((d, idx) => [d, idx]));
   const buyPoints = [];

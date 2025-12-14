@@ -349,7 +349,7 @@ const handleAIMouseLeave = () => {
 
     <header class="app-header">
       <div>
-        <h1>StockTool 云端量化 V1.0.3</h1>
+        <h1>StockTool 云端量化 V1.0.4</h1>
         <p>一键上传 CSV · 自动回测 · 智能洞察</p>
       </div>
       <div class="header-actions">
@@ -377,9 +377,11 @@ const handleAIMouseLeave = () => {
           <strong>版本更新提醒</strong>
           <ul class="tip-list">
             <li>通达信（TDX）编辑器语法识别升级，语句提示更贴合原生体验。</li>
-            <li>收益热力图改为以颜色深浅表示盈亏幅度，提升视觉辨识度。</li>
-            <li>未启用「动态资金管理」或「买入对冲」则不会展示相关卡片，避免空白模块。</li>
-            <li>AI 分析默认关闭，有需再打开即可开始服务。</li>
+            <li>收益热力图以颜色深浅表示盈亏幅度，取消每格数字显示，让颜色本身成为热力信号。</li>
+            <li>动态资金与买入对冲卡片仅在相关策略运行后才显示，避免空白。</li>
+            <li>AI 分析默认关闭，可按需激活；摘要在回测结果更新时会自动刷新。</li>
+            <li>风控面板补充说明，并加入“保守/平衡/进攻”卡片与加码模拟器，参数解释和说明更加完整。</li>
+            <li>修复 K 线 tooltip 显示错误（使用原始数据而不是 dataIndex）并清除旧的摘要缓存。</li>
           </ul>
         </div>
         <button type="button" class="tip-close" @click="showTopTip = false" aria-label="关闭提示">✕</button>

@@ -20,6 +20,7 @@ const baseCategories = [
   { key: 'scores', title: '指标评分', desc: '多维指标综合得分' },
   { key: 'plan', title: '仓位计划', desc: '加仓/再平衡建议' },
   { key: 'stop', title: '止盈止损', desc: 'ATR 建议价位' },
+  { key: 'risk', title: '风控模板', desc: '多场景止盈止损' },
   { key: 'heatmap', title: '收益热力图', desc: '持有周期 VS 收益' },
   { key: 'multi', title: '多周期信号', desc: '不同周期买卖提示' },
   { key: 'report', title: '专业回测报告', desc: '高级绩效指标' },
@@ -27,6 +28,47 @@ const baseCategories = [
   { key: 'dynamic', title: '资金管理', desc: '投入/对冲轨迹' },
   { key: 'buyhedge', title: '买入对冲', desc: '逢跌加仓表现' },
 ];
+
+const riskProfiles = [
+  {
+    key: 'conservative',
+    label: '保守 · 快速止损',
+    description: '止损近、止盈稍远，适合锁定回撤',
+    stopMultiplier: 1.1,
+    rewardMultiplier: 1.4,
+  },
+  {
+    key: 'balanced',
+    label: '平衡 · 标准策略',
+    description: '止损/止盈配比平衡，适合常规持股',
+    stopMultiplier: 1.6,
+    rewardMultiplier: 2,
+  },
+  {
+    key: 'aggressive',
+    label: '进攻 · 跟踪止盈',
+    description: '止损稍远、止盈更远，适合趋势向上加仓',
+    stopMultiplier: 2.2,
+    rewardMultiplier: 3,
+  },
+];
+
+const riskToleranceOptions = [
+  { key: 'conservative', label: '低风险' },
+  { key: 'balanced', label: '中性' },
+  { key: 'aggressive', label: '高风险' },
+];
+const riskToleranceFactors = {
+  conservative: 0.9,
+  balanced: 1,
+  aggressive: 1.1,
+};
+const simulatorConfig = ref({
+  targetReturn: 10,
+  riskTolerance: 'balanced',
+});
+const lotSize = 100;
+const baseCapital = computed(() => Math.max(0, Number(props.initialCapital || 0)));
 const dynamicAvailable = computed(() =>
   props.results.some(
     (entry) =>
@@ -53,6 +95,52 @@ const scores = ref([]);
 const positionPlan = ref([]);
 const planMessage = ref('');
 const stopSuggestion = ref(null);
+const simulatorPlans = computed(() => {
+  const stop = stopSuggestion.value;
+  if (!stop) return [];
+  const price = Number(stop.last_price);
+  const atr = Number(stop.atr);
+  if (!Number.isFinite(price) || !Number.isFinite(atr)) return [];
+  const capital = baseCapital.value;
+  if (!capital) return [];
+  const targetReturnPct = Math.max(0, Number(simulatorConfig.value.targetReturn) || 0);
+  if (!targetReturnPct) return [];
+  const toleranceFactor = riskToleranceFactors[simulatorConfig.value.riskTolerance] || 1;
+  const shares = price > 0 ? capital / price : 0;
+  const targetProfit = (capital * targetReturnPct) / 100;
+  const shareStepRaw = Math.max(shares, 1) * 0.25;
+  const shareStep = Math.max(lotSize, Math.round(shareStepRaw / lotSize) * lotSize || lotSize);
+  return riskProfiles.map((profile) => {
+    const stopDistance = profile.stopMultiplier * atr * toleranceFactor;
+    const takeDistance = profile.rewardMultiplier * atr * toleranceFactor;
+    const stopPrice = Math.max(price - stopDistance, 0);
+    const takePrice = price + takeDistance;
+    const profitFromPosition = shares * takeDistance;
+    const unmetProfit = Math.max(0, targetProfit - profitFromPosition);
+    const extraSharesNeededBase = takeDistance > 0 ? Math.max(0, Math.ceil(unmetProfit / takeDistance)) : 0;
+    const extraSharesNeeded = Math.ceil(extraSharesNeededBase / lotSize) * lotSize;
+    const addSteps = extraSharesNeeded > 0 ? Math.ceil(extraSharesNeeded / shareStep) : 0;
+    const extraCapitalNeeded = extraSharesNeeded * price;
+    const riskLabel =
+      unmetProfit <= 0
+        ? '当前仓位即可实现'
+        : `需补仓 ${addSteps} 步`;
+    return {
+      ...profile,
+      stopPrice,
+      takePrice,
+      stopDistance,
+      takeDistance,
+      profitFromPosition,
+      unmetProfit,
+      extraCapitalNeeded,
+      addSteps,
+      shareStep,
+      riskLabel,
+    };
+  });
+});
+
 const heatmapData = ref(null);
 const heatmapLookup = ref({});
 const heatmapMessage = ref('');
@@ -498,6 +586,7 @@ watch(
       reportData.value = null;
       reportError.value = '';
       reportDirty.value = true;
+      dailyBrief.value = '';
     }
   },
   { immediate: true }
@@ -890,6 +979,7 @@ const switchTab = (tab) => {
   if (tab === 'brief' && !dailyBrief.value) fetchBrief();
   if (tab === 'plan' && !positionPlan.value.length) fetchPlan();
   if (tab === 'stop' && !stopSuggestion.value) fetchStop();
+  if (tab === 'risk' && !stopSuggestion.value) fetchStop();
   if (tab === 'heatmap' && !heatmapData.value) fetchHeatmap();
   if (tab === 'multi' && !multiSignals.value.length) fetchMulti();
   if (tab === 'dynamic') {
@@ -1160,7 +1250,15 @@ const isCategoryDisabled = (key) => {
 
       <section v-else-if="activeTab === 'stop'">
         <div v-if="!stopSuggestion" class="empty">点击标签即可获取最新建议</div>
-        <div v-else class="stop-grid">
+        <div v-else>
+          <div class="stop-hint">
+            <p>
+              当前根据最新价（{{ formatAmount(stopSuggestion.last_price) }}）与 ATR 预估出各类价位：
+              “止损/止盈距离”显示距离最新价的差值及所占百分比，风险回报 = 止盈距离 ÷ 止损距离。
+              可据此快速判断盈亏比是否符合策略要求。
+            </p>
+          </div>
+          <div class="stop-grid">
           <div class="stop-card">
             <span>最新价</span>
             <strong>{{ formatAmount(stopSuggestion.last_price) }}</strong>
@@ -1200,6 +1298,90 @@ const isCategoryDisabled = (key) => {
           <div class="stop-card">
             <span>风险回报</span>
             <strong>{{ formatRiskReward(stopSuggestion.risk_reward) }}</strong>
+          </div>
+        </div>
+        </div>
+      </section>
+
+      <section v-else-if="activeTab === 'risk'">
+        <div v-if="!stopSuggestion" class="empty">等待止盈止损建议以生成风控模拟...</div>
+        <div v-else>
+          <div class="risk-intro">
+            <p>
+              当前持仓基于最新已知价格（{{ formatAmount(stopSuggestion.last_price) }}）和 ATR，
+              可选择不同强度的风险承受度来生成加码/止盈策略。系统会按照初始资金和目标收益给出
+              后续加码所需资金、每步份额与风险回报预估。
+            </p>
+            <p>
+              上方“风险承受”开关用于调节整体止盈/止损距离——从保守到激进分别对应不同的 ATR 倍数。
+              下方的保守/平衡/进攻卡片是在当前风险级别下的三种执行模板，方便你快速比较仓位调度、
+              加码步数与潜在收益，选择最贴合交易计划的方案。
+            </p>
+          </div>
+          <div class="simulator-panel">
+            <div class="simulator-form">
+              <div class="form-field">
+                <label>目标收益 (%)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  v-model.number="simulatorConfig.targetReturn"
+                />
+              </div>
+              <div class="form-field">
+                <label>风险承受</label>
+                <div class="radio-group">
+                  <button
+                    v-for="opt in riskToleranceOptions"
+                    :key="opt.key"
+                    type="button"
+                    :class="{ active: simulatorConfig.riskTolerance === opt.key }"
+                    @click="simulatorConfig.riskTolerance = opt.key"
+                  >
+                    {{ opt.label }}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div v-if="simulatorPlans.length" class="simulator-results">
+              <article v-for="plan in simulatorPlans" :key="plan.key" class="simulator-card">
+                <header>
+                  <div>
+                    <strong>{{ plan.label }}</strong>
+                    <p>{{ plan.description }}</p>
+                  </div>
+                  <span class="simulator-tag">{{ plan.riskLabel }}</span>
+                </header>
+                <div class="simulator-grid">
+                  <div>
+                    <dt>止损价格</dt>
+                    <dd>{{ formatAmount(plan.stopPrice) }}</dd>
+                  </div>
+                  <div>
+                    <dt>止盈价格</dt>
+                    <dd>{{ formatAmount(plan.takePrice) }}</dd>
+                  </div>
+                  <div>
+                    <dt>预期利润</dt>
+                    <dd>{{ formatAmount(plan.profitFromPosition) }}</dd>
+                  </div>
+                  <div>
+                    <dt>需追加资金</dt>
+                    <dd>{{ plan.extraCapitalNeeded ? formatAmount(plan.extraCapitalNeeded) : '无需' }}</dd>
+                  </div>
+                  <div>
+                    <dt>加码步数</dt>
+                    <dd>{{ plan.addSteps || '当前仓位' }}</dd>
+                  </div>
+                  <div>
+                    <dt>每步份额</dt>
+                    <dd>{{ plan.shareStep }} 股（约）</dd>
+                  </div>
+                </div>
+              </article>
+            </div>
           </div>
         </div>
       </section>
