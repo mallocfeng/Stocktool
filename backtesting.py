@@ -450,6 +450,8 @@ def backtest_dynamic_capital(
     hedge_entry_shares = 0
     hedge_entry_loss_state = 0
     hedge_entry_amount = 0.0
+    position_cost = 0.0
+    position_fee_total = 0.0
 
     loss_streak = 0
     hedge_loss_streak = 0
@@ -586,6 +588,8 @@ def backtest_dynamic_capital(
                         cost = shares * price
                         fee = cost * fee_rate
                         cash_main -= cost + fee
+                        position_cost += cost
+                        position_fee_total += fee
                         position = shares
                         entry_price = price
                         entry_idx = i
@@ -720,6 +724,8 @@ def backtest_dynamic_capital(
                     entry_shares = 0
                     entry_investment_amount = 0.0
                     entry_loss_state = 0
+                    position_cost = 0.0
+                    position_fee_total = 0.0
                     pending_exit = False
                     pending_exit_reason = ""
 
@@ -843,6 +849,8 @@ def backtest_dynamic_capital(
     result.hedge_max_investment_used = (
         float(hedge_max_investment_used) if hedge_enabled and hedge_max_investment_used else None
     )
+    floating_value = position * final_price
+    floating_pnl = floating_value - position_cost - position_fee_total
     result.dynamic_summary = {
         "initialInvestment": float(initial_investment),
         "lossStepAmount": float(loss_step_lots),
@@ -863,6 +871,7 @@ def backtest_dynamic_capital(
         "forceStopByDrawdown": force_stop,
         "maxDrawdownLimitInput": config.get("maxDrawdownLimit"),
         "maxDrawdownLimitValue": float(drawdown_limit_value) if drawdown_limit_value is not None else None,
+        "currentFloatingPnl": float(floating_pnl),
     }
     return result
 

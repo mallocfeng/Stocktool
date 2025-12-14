@@ -267,6 +267,27 @@ const investmentSeriesHedge = computed(
 const dynamicDetails = computed(() => dynamicEntry.value?.result?.positionDetail || []);
 const dynamicTrades = computed(() => dynamicEntry.value?.result?.trades || []);
 const dynamicSummary = computed(() => dynamicEntry.value?.result?.dynamicSummary || null);
+const dynamicTradeSummary = computed(() => {
+  const trades = dynamicTrades.value || [];
+  if (!trades.length) return null;
+  let totalOpen = 0;
+  let totalClose = 0;
+  let totalProfit = 0;
+  trades.forEach((trade) => {
+    const qty = Number(trade.adjusted_quantity ?? 0);
+    const openValue = Number(trade.entry_price ?? 0) * qty;
+    const closeValue = Number(trade.exit_price ?? 0) * qty;
+    totalOpen += isFinite(openValue) ? openValue : 0;
+    totalClose += isFinite(closeValue) ? closeValue : 0;
+    const pnl = Number(trade.pnl_with_dynamic_fund ?? 0);
+    totalProfit += Number.isFinite(pnl) ? pnl : 0;
+  });
+  return {
+    totalOpen,
+    totalClose,
+    totalProfit,
+  };
+});
 const buyHedgeSummary = computed(() => currentEntry.value?.result?.buyHedgeSummary || null);
 const buyHedgeTrades = computed(() => currentEntry.value?.result?.buyHedgeTrades || []);
 const buyHedgeEvents = computed(() => currentEntry.value?.result?.buyHedgeEvents || []);
@@ -290,6 +311,34 @@ const dynamicGateMessage = computed(() => {
   if (!props.results.length) return '请先运行并选择回测结果';
   if (!dynamicSummary.value) return '当前策略未启用动态资金管理';
   return '';
+});
+
+
+const currentFloatingPnl = computed(() => {
+  const val = dynamicSummary.value?.currentFloatingPnl;
+  if (val === null || val === undefined) return 0;
+  const num = Number(val);
+  return Number.isFinite(num) ? num : 0;
+});
+
+const lastDynamicTrade = computed(() => {
+  const trades = dynamicTrades.value;
+  if (!trades || !trades.length) return null;
+  return trades[trades.length - 1];
+});
+
+const lastClosedPnl = computed(() => {
+  const last = lastDynamicTrade.value;
+  if (!last) return null;
+  return Number(last.pnl_with_dynamic_fund ?? last.pnl ?? null);
+});
+
+const lastAddStatus = computed(() => {
+  const pnl = lastClosedPnl.value;
+  if (pnl == null || Number.isNaN(pnl)) return '-';
+  if (pnl > 0) return '盈利';
+  if (pnl < 0) return '亏损';
+  return '持平';
 });
 
 const renderBuyHedgePriceChart = () => {
@@ -1016,8 +1065,12 @@ const heatmapColor = (value) => {
 };
 const formatAmount = (val) =>
   Number.isFinite(Number(val)) ? Number(val).toLocaleString('zh-CN', { maximumFractionDigits: 2 }) : '-';
-const formatPercent = (val) =>
-  Number.isFinite(Number(val)) ? `${Number(val).toFixed(2)}%` : '-';
+const formatPercent = (val) => {
+  const num = Number(val);
+  if (!Number.isFinite(num)) return '-';
+  const ratio = num > 1 || num < -1 ? num : num * 100;
+  return `${ratio.toFixed(2)}%`;
+};
 const formatRiskReward = (val) =>
   Number.isFinite(Number(val)) ? Number(val).toFixed(2) : '-';
 const formatATRMultiple = (val) =>
@@ -1412,6 +1465,24 @@ const isCategoryDisabled = (key) => {
                 <li><span>当前投资金额</span><strong>{{ formatAmount(latestInvestment) }}</strong></li>
                 <li><span>当前对冲金额</span><strong>{{ formatAmount(latestHedge) }}</strong></li>
                 <li>
+                  <span>当前持仓浮动盈亏</span>
+                  <strong :class="currentFloatingPnl >= 0 ? 'positive' : 'negative'">
+                    {{ Number.isFinite(currentFloatingPnl) ? formatAmount(currentFloatingPnl) : '0.00' }}
+                  </strong>
+                </li>
+                <li>
+                  <span>最近平仓盈亏</span>
+                  <strong
+                    :class="lastClosedPnl != null ? (lastClosedPnl >= 0 ? 'positive' : 'negative') : ''"
+                  >
+                    {{ lastClosedPnl != null ? formatAmount(lastClosedPnl) : '-' }}
+                  </strong>
+                </li>
+                <li>
+                  <span>最近一次加仓状态</span>
+                  <strong>{{ lastAddStatus }}</strong>
+                </li>
+                <li>
                   <span>是否强制停止</span>
                   <strong :class="dynamicForceStop ? 'negative' : 'positive'">{{ formatBoolean(dynamicForceStop) }}</strong>
                 </li>
@@ -1454,23 +1525,27 @@ const isCategoryDisabled = (key) => {
             <div v-else class="table-wrapper compact-table">
               <table class="modern-table">
                 <thead>
-                  <tr>
-                    <th>开仓时间</th>
-                    <th>平仓时间</th>
-                    <th>投资金额</th>
-                    <th>连续亏损</th>
-                    <th>数量（手）</th>
-                    <th>动态盈亏</th>
-                    <th>对冲投资</th>
-                    <th>对冲连亏</th>
-                    <th>对冲数量（手）</th>
-                    <th>对冲盈亏</th>
-                  </tr>
+                    <tr>
+                      <th>开仓时间</th>
+                      <th>平仓时间</th>
+                      <th>入场价</th>
+                      <th>出场价</th>
+                      <th>投资金额</th>
+                      <th>连续亏损</th>
+                      <th>数量（手）</th>
+                      <th>动态盈亏</th>
+                      <th>对冲投资</th>
+                      <th>对冲连亏</th>
+                      <th>对冲数量（手）</th>
+                      <th>对冲盈亏</th>
+                    </tr>
                 </thead>
                 <tbody>
                   <tr v-for="trade in dynamicTrades" :key="trade.entry_date + trade.exit_date">
                     <td>{{ trade.entry_date }}</td>
                     <td>{{ trade.exit_date }}</td>
+                    <td>{{ formatAmount(trade.entry_price ?? '-') }}</td>
+                    <td>{{ formatAmount(trade.exit_price ?? '-') }}</td>
                     <td>{{ formatAmount(trade.investment_amount ?? '-') }}</td>
                     <td>{{ trade.loss_streak ?? '-' }}</td>
                     <td>{{ trade.adjusted_quantity != null ? Math.round(trade.adjusted_quantity / 100) : '-' }}</td>
@@ -1486,6 +1561,20 @@ const isCategoryDisabled = (key) => {
                   </tr>
                 </tbody>
               </table>
+              <div v-if="dynamicTradeSummary" class="trade-summary-row">
+                <div>
+                  <span>开仓金额</span>
+                  <strong>{{ formatAmount(dynamicTradeSummary.totalOpen) }}</strong>
+                </div>
+                <div>
+                  <span>平仓金额</span>
+                  <strong>{{ formatAmount(dynamicTradeSummary.totalClose) }}</strong>
+                </div>
+                <div>
+                  <span>平仓盈亏</span>
+                  <strong>{{ formatAmount(dynamicTradeSummary.totalProfit) }}</strong>
+                </div>
+              </div>
             </div>
           </div>
           <div class="dynamic-detail">
