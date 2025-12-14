@@ -894,12 +894,17 @@ const heatmapColor = (value) => {
   const num = Number(value);
   if (!Number.isFinite(num)) return 'rgba(15, 23, 42, 0.4)';
   const base = heatmapMaxAbs.value || 0.01;
-  const magnitude = Math.min(Math.abs(num) / base, 1);
-  const alpha = 0.25 + magnitude * 0.6;
+  const normalized = Math.min(Math.abs(num) / base, 1);
   if (num >= 0) {
-    return `rgba(34,197,94,${alpha})`;
+    const saturation = 65 + normalized * 10;
+    const lightness = 55 - normalized * 15;
+    const alpha = 0.25 + normalized * 0.6;
+    return `hsla(140, ${saturation}%, ${lightness}%, ${alpha})`;
   }
-  return `rgba(239,68,68,${alpha})`;
+  const saturation = 70 + normalized * 10;
+  const lightness = 75 - normalized * 40;
+  const alpha = 0.2 + normalized * 0.7;
+  return `hsla(0, ${saturation}%, ${lightness}%, ${alpha})`;
 };
 const formatAmount = (val) =>
   Number.isFinite(Number(val)) ? Number(val).toLocaleString('zh-CN', { maximumFractionDigits: 2 }) : '-';
@@ -1457,6 +1462,9 @@ const isCategoryDisabled = (key) => {
       <section v-else-if="activeTab === 'heatmap'">
         <div v-if="!heatmapData || !heatmapData.data" class="empty">{{ heatmapMessage || '暂无可用数据' }}</div>
         <div v-else class="heatmap-table">
+          <p class="heatmap-tip">
+            每行代表一次入场，列是持有天数。颜色越深，代表收益越大（绿色）或亏损越严重（红色），颜色越浅说明幅度较小。忽略具体数值，通过色彩即可快速判断组合表现。
+          </p>
           <div class="heatmap-row header">
             <div class="y-label">日期 \\ 持有</div>
             <div class="x-list">

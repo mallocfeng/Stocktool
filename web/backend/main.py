@@ -647,31 +647,29 @@ def get_heatmap():
     if state.df is None:
         raise HTTPException(status_code=400, detail="Run backtest first")
     try:
-        if not isinstance(state.df.index, pd.DatetimeIndex):
-            df = state.df.copy()
-            df.index = pd.to_datetime(df.index)
-        else:
-            df = state.df
-        hourly_df = df.resample("1H").last().dropna(how="any")
-        if hourly_df.empty:
-            return {"message": "数据不足"}
-
-        res = holding_return_heatmap(hourly_df)
+        # We need to return data suitable for a heatmap chart.
+        # holding_return_heatmap returns a DataFrame where index=entry_date, columns=holding_days, value=return
+        res = holding_return_heatmap(state.df)
         if res.empty:
             return {"message": "数据不足"}
-
-        subset = res.tail(100)
-
+        
+        # Convert to ECharts heatmap format: [ [x, y, value], ... ]
+        # X axis: Holding Days (columns)
+        # Y axis: Entry Date (index)
+        
+        subset = res.tail(100) 
+        
         data = []
         y_labels = subset.index.astype(str).tolist()
         x_labels = subset.columns.astype(str).tolist()
-
+        
         for i, date_idx in enumerate(subset.index):
             for j, hold_col in enumerate(subset.columns):
                 val = subset.iloc[i, j]
+                # ECharts heatmap data: [x_index, y_index, value]
                 if pd.notna(val):
                     data.append([j, i, float(val)])
-
+        
         return {
             "x_labels": x_labels,
             "y_labels": y_labels,

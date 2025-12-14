@@ -1577,14 +1577,21 @@ table.modern-table tbody tr:hover {
 .heatmap-row .x-list {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(26px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(7px, 1fr));
   gap: 2px;
 }
 
 .heatmap-cell {
-  height: 26px;
+  height: 13px;
   border-radius: 4px;
   transition: background 0.2s ease;
+}
+
+.heatmap-tip {
+  font-size: 0.75rem;
+  color: rgba(226, 232, 240, 0.75);
+  margin-bottom: 0.5rem;
+  line-height: 1.4;
 }
 
 .heatmap-row .x-list span {
