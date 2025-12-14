@@ -314,6 +314,51 @@ label {
   font-size: 0.9rem;
 }
 
+.app-tip-card {
+  margin: 0 auto;
+  margin-top: 0.6rem;
+  margin-bottom: 0.65rem;
+  padding: 0.9rem 1.2rem;
+  border-radius: 14px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  background: linear-gradient(125deg, rgba(var(--tone-1-rgb), 0.16), rgba(var(--tone-4-rgb), 0.05));
+  border: 1px solid rgba(var(--tone-1-rgb), 0.45);
+  box-shadow: 0 16px 40px rgba(var(--overlay-rgb), 0.15);
+  color: var(--text-primary);
+}
+
+.app-tip-content {
+  flex: 1;
+  line-height: 1.55;
+  font-size: 0.95rem;
+}
+
+.app-tip-card strong {
+  display: block;
+  font-size: 1rem;
+  margin-bottom: 0.2rem;
+  color: var(--tone-1);
+}
+
+.tip-close {
+  border: none;
+  background: rgba(var(--overlay-rgb), 0.08);
+  color: var(--text-secondary);
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.tip-close:hover {
+  background: rgba(var(--overlay-rgb), 0.18);
+  color: var(--text-primary);
+}
+
 .header-actions {
   display: flex;
   align-items: center;
@@ -1588,10 +1633,19 @@ table.modern-table tbody tr:hover {
 }
 
 .heatmap-tip {
-  font-size: 0.75rem;
-  color: rgba(226, 232, 240, 0.75);
-  margin-bottom: 0.5rem;
-  line-height: 1.4;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  margin-bottom: 0.75rem;
+  line-height: 1.5;
+  background: linear-gradient(
+    135deg,
+    rgba(var(--tone-1-rgb), 0.18),
+    rgba(var(--tone-1-rgb), 0.05)
+  );
+  border-left: 4px solid var(--tone-1);
+  padding: 0.45rem 0.9rem;
+  border-radius: 0.4rem;
+  box-shadow: inset 0 0 6px rgba(var(--overlay-rgb), 0.25);
 }
 
 .heatmap-row .x-list span {

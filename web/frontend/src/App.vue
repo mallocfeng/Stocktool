@@ -202,6 +202,8 @@ const handleOverlayUnblock = () => {
   overlayMessage.value = { title: '', detail: '' };
 };
 
+const showTopTip = ref(true);
+
 const handleAIToggle = () => {
   aiEnabled.value = !aiEnabled.value;
   if (!aiEnabled.value) {
@@ -362,6 +364,18 @@ const handleAIMouseLeave = () => {
         </div>
       </div>
     </header>
+    <transition name="fade">
+      <section v-if="showTopTip" class="app-tip-card">
+        <div class="app-tip-content">
+          <strong>版本更新提醒</strong>
+          <p>
+            本次发布进一步强化通达信（TDX）公式编辑器的语法识别与提示，同时拓展 样式更强的热力图显示（颜色深浅即代表收益/亏损幅度）。
+            如果未启用“动态资金管理”或“买入对冲”功能，对应卡片和图表不会出现在主视图，避免空白内容。AI 分析模块默认关闭，请在需要时手动激活。
+          </p>
+        </div>
+        <button type="button" class="tip-close" @click="showTopTip = false">关闭</button>
+      </section>
+    </transition>
 
     <main class="app-main">
       <aside class="sidebar">
