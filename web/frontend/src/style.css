@@ -36,6 +36,8 @@
   --tone-5-rgb: 245, 158, 11;
   --tone-6: #34d399;
   --tone-6-rgb: 52, 211, 153;
+  --tip-bg-gradient: linear-gradient(125deg, rgba(var(--tone-1-rgb), 0.16), rgba(var(--tone-4-rgb), 0.05));
+  --tip-border: rgba(var(--tone-1-rgb), 0.45);
 }
 
 :root[data-theme='light'] {
@@ -76,6 +78,8 @@
   --tone-5-rgb: 245, 158, 11;
   --tone-6: #059669;
   --tone-6-rgb: 5, 150, 105;
+  --tip-bg-gradient: linear-gradient(125deg, rgba(250, 204, 21, 0.25), rgba(253, 186, 116, 0.1));
+  --tip-border: rgba(245, 158, 11, 0.45);
 }
 
 :root[data-theme='morandi'] {
@@ -116,6 +120,8 @@
   --tone-5-rgb: 216, 186, 147;
   --tone-6: #8aa68c;
   --tone-6-rgb: 138, 166, 140;
+  --tip-bg-gradient: linear-gradient(125deg, rgba(255, 235, 205, 0.35), rgba(232, 197, 169, 0.15));
+  --tip-border: rgba(210, 148, 140, 0.65);
 }
 
 body {
@@ -316,7 +322,7 @@ label {
 
 .app-tip-card {
   margin: 0;
-  margin-top: 0.6rem;
+  margin-top: 1.5rem;
   margin-bottom: 0.65rem;
   padding: 0.9rem 1.2rem;
   border-radius: 14px;
@@ -324,12 +330,12 @@ label {
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  background: linear-gradient(125deg, rgba(var(--tone-1-rgb), 0.16), rgba(var(--tone-4-rgb), 0.05));
-  border: 1px solid rgba(var(--tone-1-rgb), 0.45);
+  background: var(--tip-bg-gradient);
+  border: 1px solid var(--tip-border);
   box-shadow: 0 16px 40px rgba(var(--overlay-rgb), 0.15);
   color: var(--text-primary);
   width: 100%;
-  max-width: calc(100% - 40px);
+  max-width: calc(100% - 4px);
   box-sizing: border-box;
 }
 
