@@ -47,12 +47,12 @@ const config = reactive({
     dca: { enabled: false, size: 5, target: 20 },
     grid: { enabled: false, pct: 5, cash: 1000, limit: '', accumulate: true },
     dynamic: {
-      enabled: false,
+      enabled: true,
       lossStepAmount: 10,
       maxAddSteps: 5,
       maxInvestmentLimit: 50000,
       singleInvestmentLimit: '',
-      forceOneLotEntry: false,
+      forceOneLotEntry: true,
       allowSingleLimitOverride: false,
       resetOnWin: true,
       maxDrawdownLimit: '',
@@ -724,56 +724,68 @@ const runBacktest = () => {
           <div class="drawer-body">
             <div class="strategy-group">
               <div class="strategy-card dynamic-card">
-                <label class="checkbox-row">
+                <label class="checkbox-row dynamic-card-toggle">
                   <input type="checkbox" v-model="config.strategies.dynamic.enabled" />
                   <span>动态资金管理</span>
                 </label>
-                <div class="sub-grid" v-if="config.strategies.dynamic.enabled">
-                  <label class="field">
-                    <span>亏损加注（手）</span>
-                    <input type="number" v-model="config.strategies.dynamic.lossStepAmount" min="0" />
-                    <small class="field-hint">单位为手，1 手 = 100 股</small>
-                  </label>
-                  <label class="field">
-                    <span>连续加注次数</span>
-                    <input type="number" v-model="config.strategies.dynamic.maxAddSteps" min="0" />
-                  </label>
-                  <label class="field">
-                    <span>启用 1 手首单</span>
-                    <input type="checkbox" v-model="config.strategies.dynamic.forceOneLotEntry" />
-                    <small class="field-hint">首单固定 1 手，后续加仓再受金额限制</small>
-                  </label>
-                  <label class="field">
-                    <span>单笔加仓上限</span>
-                    <input type="number" v-model="config.strategies.dynamic.singleInvestmentLimit" min="0" />
-                    <small class="field-hint">用于限制每次加仓的金额（首单 1 手不受此限）</small>
-                  </label>
+                <div class="dynamic-card-body" v-if="config.strategies.dynamic.enabled">
+                  <div class="dynamic-grid">
+                    <label class="field">
+                      <span>亏损加注（手）</span>
+                      <input type="number" v-model="config.strategies.dynamic.lossStepAmount" min="0" />
+                      <small class="field-hint">单位为手，1 手 = 100 股</small>
+                    </label>
+                    <label class="field">
+                      <span>连续加注次数</span>
+                      <input type="number" v-model="config.strategies.dynamic.maxAddSteps" min="0" />
+                    </label>
+                  </div>
+                  <div class="dynamic-note">
+                    <p>首单金额由市场价格自动推算（1 手成本 + 手续费），与任何金额限制无关；“单笔上限 / 总上限”只约束后续加仓或总暴露。</p>
+                    <p>若 1 手都超出限额，可选择“允许忽略一次”或禁止加仓并提示原因。</p>
+                  </div>
+                  <div class="dynamic-grid dynamic-grid--limits">
+                    <div class="dynamic-limit-toggle">
+                      <label class="checkbox-row">
+                        <input type="checkbox" v-model="config.strategies.dynamic.forceOneLotEntry" />
+                        <span>启用 1 手首单</span>
+                      </label>
+                      <small class="field-hint">首单固定 1 手，后续加仓再受金额限制</small>
+                    </div>
+                    <label class="field">
+                      <span>单笔加仓上限</span>
+                      <input type="number" v-model="config.strategies.dynamic.singleInvestmentLimit" min="0" />
+                      <small class="field-hint">用于限制每次加仓金额，首单 1 手不受限</small>
+                    </label>
+                  </div>
                   <label class="checkbox-row">
                     <input type="checkbox" v-model="config.strategies.dynamic.allowSingleLimitOverride" />
                     <span>当单笔上限低于 1 手时仍允许加仓</span>
                   </label>
-                  <label class="field">
-                    <span>总资金上限</span>
-                    <input type="number" v-model="config.strategies.dynamic.maxInvestmentLimit" min="0" />
-                    <small class="field-hint">当前持仓市值+加仓不得超过此额度</small>
-                  </label>
-                  <label class="field">
-                    <span>最大允许回撤</span>
-                    <input
-                      type="text"
-                      v-model="config.strategies.dynamic.maxDrawdownLimit"
-                      placeholder="如 50000 或 15%"
-                    />
-                  </label>
+                  <div class="dynamic-grid dynamic-grid--limits">
+                    <label class="field">
+                      <span>总资金上限</span>
+                      <input type="number" v-model="config.strategies.dynamic.maxInvestmentLimit" min="0" />
+                      <small class="field-hint">当前持仓市值 + 加仓不得超过此额度</small>
+                    </label>
+                    <label class="field">
+                      <span>最大允许回撤</span>
+                      <input
+                        type="text"
+                        v-model="config.strategies.dynamic.maxDrawdownLimit"
+                        placeholder="如 50000 或 15%"
+                      />
+                    </label>
+                  </div>
                   <label class="checkbox-row">
                     <input type="checkbox" v-model="config.strategies.dynamic.resetOnWin" />
                     <span>盈利后恢复初始金额</span>
                   </label>
                   <div class="sub-section">
-                  <label class="checkbox-row">
-                    <input type="checkbox" v-model="config.strategies.dynamic.enableHedge" />
-                    <span>启用反向对冲</span>
-                  </label>
+                    <label class="checkbox-row">
+                      <input type="checkbox" v-model="config.strategies.dynamic.enableHedge" />
+                      <span>启用反向对冲</span>
+                    </label>
                     <div class="sub-grid" v-if="config.strategies.dynamic.enableHedge">
                       <label class="field">
                         <span>对冲初始金额</span>

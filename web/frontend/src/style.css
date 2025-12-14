@@ -1449,6 +1449,67 @@ label {
   background: transparent;
 }
 
+.dynamic-card-toggle {
+  font-size: 1rem;
+  font-weight: 600;
+  gap: 10px;
+}
+
+.dynamic-card-body {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(var(--surface-rgb), 0.25));
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dynamic-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+.dynamic-grid--limits {
+  align-items: flex-end;
+}
+
+.dynamic-note {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  line-height: 1.25;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dynamic-note p {
+  margin: 0;
+}
+
+.dynamic-note p + p {
+  margin-top: 4px;
+}
+
+.dynamic-limit-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px dashed rgba(var(--tone-1-rgb), 0.5);
+  background: rgba(var(--tone-1-rgb), 0.08);
+}
+
+.dynamic-limit-toggle .checkbox-row {
+  gap: 6px;
+  font-weight: 600;
+  margin-bottom: 0;
+}
+
 .module-divider {
   height: 1px;
   margin: 8px 0 14px;
