@@ -204,26 +204,39 @@ const renderBuyHedgePriceChart = () => {
   if (!buyHedgePriceChartInstance) {
     buyHedgePriceChartInstance = echarts.init(dom, currentThemeName.value);
   }
-  const dates = buyHedgeEvents.value.map((evt) => evt.date);
-  const priceLine = buyHedgeEvents.value.map((evt) => evt.price ?? null);
-  const costLine = buyHedgeEvents.value.map((evt) => evt.avg_cost ?? null);
-  const triggerLine = buyHedgeEvents.value.map((evt) => {
-    if (evt.trigger_price != null) return evt.trigger_price;
-    if (evt.type === 'entry') return evt.price ?? null;
-    return null;
-  });
-  const totalShares = buyHedgeEvents.value.map((evt) =>
+  const sortedEvents = [...buyHedgeEvents.value].sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+  const dates = sortedEvents.map((evt) => evt.date);
+  const priceLine = sortedEvents.map((evt) => (evt.price ?? null));
+  const totalShares = sortedEvents.map((evt) =>
     evt.total_shares != null ? Math.round(evt.total_shares) : null
   );
-  const scatterPoints = buyHedgeEvents.value.map((evt) => ({
-    value: [evt.date, evt.price],
-    layer: evt.layer,
-    type: buyHedgeEventLabel(evt.type),
-  }));
+  let lastCost = null;
+  const costLine = sortedEvents.map((evt, idx) => {
+    const raw = evt.avg_cost ?? null;
+    if (raw != null) {
+      lastCost = raw;
+      return raw;
+    }
+    const qty = totalShares[idx];
+    if (qty != null && qty > 0 && lastCost != null) return lastCost;
+    return null;
+  });
+  const triggerLine = sortedEvents.map((evt) => {
+    if (evt.trigger_price != null) return evt.trigger_price;
+    return null;
+  });
+  const scatterPoints = sortedEvents
+    .filter((evt) => evt.type && evt.type !== 'record')
+    .map((evt) => ({
+      value: [evt.date, evt.price],
+      layer: evt.layer,
+      type: buyHedgeEventLabel(evt.type),
+    }));
   const eventColors = {
     首次买入: '#60a5fa',
     加仓: '#22c55e',
     跳过: '#f97316',
+    退出: '#f87171',
     记录: '#94a3b8',
   };
   const eventMarkers = scatterPoints.map((pt) => ({
@@ -257,7 +270,7 @@ const renderBuyHedgePriceChart = () => {
         return lines.join('<br/>');
       },
     },
-    legend: { data: ['触发价', '事件价格', '持仓均价', '持仓数量', '价差(分)'], bottom: 12 },
+    legend: { data: ['触发价', '事件价格', '持仓均价', '价差(分)'], bottom: 12 },
     grid: { left: 50, right: 20, top: 20, bottom: 110 },
     xAxis: { type: 'category', boundaryGap: false, data: dates, axisLabel: { margin: 18 } },
     yAxis: [
@@ -276,19 +289,13 @@ const renderBuyHedgePriceChart = () => {
       },
       { name: '持仓均价', type: 'line', data: costLine, smooth: true },
       {
-        name: '持仓数量',
-        type: 'bar',
-        data: totalShares,
-        yAxisIndex: 1,
-        itemStyle: { opacity: 0.4 },
-        barWidth: 10,
-      },
-      {
         name: '价差(分)',
         type: 'line',
         yAxisIndex: 2,
         data: priceDiff,
         smooth: true,
+        showSymbol: false,
+        connectNulls: true,
         lineStyle: { type: 'dashed' },
       },
     ],
@@ -310,7 +317,11 @@ const renderBuyHedgeImpactChart = () => {
   if (!buyHedgeImpactChartInstance) {
     buyHedgeImpactChartInstance = echarts.init(dom, currentThemeName.value);
   }
-  const categories = buyHedgeTrades.value.map((trade, idx) => trade.entry_date || `#${idx + 1}`);
+  const categories = buyHedgeTrades.value.map((trade, idx) => {
+    const base = trade.entry_date || `#${idx + 1}`;
+    const suffix = trade.trade_id != null ? `#${trade.trade_id}` : `#${idx + 1}`;
+    return `${base} ${suffix}`;
+  });
   const costImpact = buyHedgeTrades.value.map((trade) => (trade.avg_cost_delta_pct ?? 0) * 100);
   const pnlImpact = buyHedgeTrades.value.map((trade) => (trade.return_pct ?? 0) * 100);
   buyHedgeImpactChartInstance.setOption({
@@ -395,14 +406,36 @@ const renderDynamicInvestmentChart = () => {
   }
   const investMain = investmentSeriesMain.value || [];
   const investHedge = investmentSeriesHedge.value || [];
+  const toMap = (series) => new Map(series.map((item) => [item[0], item[1]]));
+  const mainMap = toMap(investMain);
+  const hedgeMap = toMap(investHedge);
+  const dates = Array.from(new Set([...mainMap.keys(), ...hedgeMap.keys()])).sort();
+  const formatAmount = (val) => {
+    const num = Number(val);
+    if (!Number.isFinite(num)) return '--';
+    return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  };
   dynamicInvestmentChartInstance.setOption({
-    tooltip: { trigger: 'item' },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (items = []) => {
+        if (!items.length) return '';
+        const label = items[0]?.axisValue ?? '';
+        const lines = [label];
+        items.forEach((item) => {
+          const value = Array.isArray(item.value) ? item.value[1] : item.value;
+          lines.push(`${item.marker} ${item.seriesName}：${formatAmount(value)}`);
+        });
+        return lines.join('<br/>');
+      },
+    },
     legend: { data: ['主方向投入', '对冲投入'], bottom: 12 },
     grid: { left: 40, right: 20, top: 20, bottom: 90 },
     xAxis: {
       type: 'category',
       boundaryGap: true,
-      data: investMain.map((item, idx) => item[0] || `T${idx + 1}`),
+      data: dates,
       axisLabel: { hideOverlap: true, margin: 12 },
     },
     yAxis: { type: 'value', scale: true },
@@ -412,14 +445,22 @@ const renderDynamicInvestmentChart = () => {
         type: 'scatter',
         symbolSize: 10,
         itemStyle: { color: '#60a5fa' },
-        data: investMain.map((item, idx) => ({ value: item[1] ?? 0, name: item[0] || `主-${idx + 1}` })),
+        data: dates
+          .filter((d) => mainMap.has(d))
+          .map((d) => ({
+            value: [d, mainMap.get(d) ?? 0],
+          })),
       },
       {
         name: '对冲投入',
         type: 'scatter',
         symbolSize: 10,
         itemStyle: { color: '#facc15' },
-        data: investHedge.map((item, idx) => ({ value: item[1] ?? 0, name: item[0] || `对冲-${idx + 1}` })),
+        data: dates
+          .filter((d) => hedgeMap.has(d))
+          .map((d) => ({
+            value: [d, hedgeMap.get(d) ?? 0],
+          })),
       },
     ],
   });

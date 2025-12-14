@@ -949,7 +949,7 @@ def backtest_buy_hedge(
         payload = event.copy()
         payload["trade_id"] = current_trade_id if current_trade_id else None
         payload["date"] = str(event.get("date"))
-        payload["type"] = event.get("type", "add")
+        payload["type"] = event.get("type", "record")
         if "shares" in payload and payload["shares"] is not None:
             payload["shares"] = shares_to_hands(int(payload["shares"]))
         if "total_shares" in payload and payload["total_shares"] is not None:
@@ -968,6 +968,10 @@ def backtest_buy_hedge(
             continue
 
         added_this_bar = False
+        exited_this_bar = False
+        event_type = None
+        event_shares = 0
+        event_note = None
 
         should_exit = position > 0 and (pending_exit or sell.iloc[i])
         if should_exit:
@@ -1026,8 +1030,10 @@ def backtest_buy_hedge(
                 can_add_more = True
                 pending_exit = False
                 pending_exit_reason = ""
+                event_type = "exit"
+                exited_this_bar = True
 
-        if position == 0 and buy.iloc[i] and start_position_shares > 0:
+        if (not exited_this_bar) and position == 0 and buy.iloc[i] and start_position_shares > 0:
             desired = start_position_shares
             affordable = int(
                 cash / (price * (1 + fee_rate)) if fee_rate >= 0 else cash // price
@@ -1047,60 +1053,32 @@ def backtest_buy_hedge(
                 current_trade_id = trade_count + 1
                 can_add_more = True
                 avg_cost = position_cost / position
-                append_event(
-                    {
-                        "date": date,
-                        "price": float(price),
-                        "shares": int(shares),
-                        "total_shares": int(position),
-                        "avg_cost": float(avg_cost),
-                        "cost": float(cost + fee),
-                        "type": "entry",
-                        "layer": 0,
-                    }
-                )
+                first_trigger_price = compute_trigger_price()
+                event_type = "entry"
+                event_shares = int(shares)
+                event_note = None
                 max_capital_used = max(max_capital_used, position_cost)
                 t1_guard.add(date, shares)
                 pending_exit = False
                 pending_exit_reason = ""
 
-        elif position > 0 and step_pct > 0 and not added_this_bar and can_add_more and not pending_exit:
+        elif position > 0 and step_pct > 0 and not added_this_bar and can_add_more and not pending_exit and not exited_this_bar:
             trigger_price = compute_trigger_price()
             if trigger_price is not None and price <= trigger_price:
                 if max_adds > 0 and add_count >= max_adds:
                     skipped_by_rule += 1
                     can_add_more = False
-                    append_event(
-                        {
-                            "date": date,
-                            "price": float(price),
-                            "shares": 0,
-                            "total_shares": int(position),
-                            "avg_cost": float(position_cost / position if position else 0.0),
-                            "type": "skip",
-                            "layer": int(add_count),
-                            "note": "已达到最大加仓次数",
-                            "trigger_price": float(trigger_price),
-                        }
-                    )
+                    event_type = "skip"
+                    event_shares = 0
+                    event_note = "已达到最大加仓次数"
                 else:
                     desired = quantity_for_add(add_count)
                     if desired <= 0:
                         skipped_by_rule += 1
                         can_add_more = False
-                        append_event(
-                            {
-                                "date": date,
-                                "price": float(price),
-                                "shares": 0,
-                                "total_shares": int(position),
-                                "avg_cost": float(position_cost / position if position else 0.0),
-                                "type": "skip",
-                                "layer": int(add_count),
-                                "note": "加仓数量为 0",
-                                "trigger_price": float(trigger_price),
-                            }
-                        )
+                        event_type = "skip"
+                        event_shares = 0
+                        event_note = "加仓数量为 0"
                     else:
                         affordable = int(cash / (price * (1 + fee_rate))) if fee_rate >= 0 else int(cash // price)
                         affordable = lot_align(affordable)
@@ -1123,19 +1101,9 @@ def backtest_buy_hedge(
                                 skipped_by_limit += 1
                                 reason = "资金占用受限"
                             can_add_more = False
-                            append_event(
-                                {
-                                    "date": date,
-                                    "price": float(price),
-                                    "shares": 0,
-                                    "total_shares": int(position),
-                                    "avg_cost": float(position_cost / position if position else 0.0),
-                                    "type": "skip",
-                                    "layer": int(add_count),
-                                    "note": reason,
-                                    "trigger_price": float(trigger_price),
-                                }
-                            )
+                            event_type = "skip"
+                            event_shares = 0
+                            event_note = reason
                         else:
                             cost = shares * price
                             fee = cost * fee_rate
@@ -1146,25 +1114,32 @@ def backtest_buy_hedge(
                             added_this_bar = True
                             last_add_price = price
                             avg_cost = position_cost / position if position > 0 else 0.0
-                            append_event(
-                                {
-                                    "date": date,
-                                    "price": float(price),
-                                    "shares": int(shares),
-                                    "total_shares": int(position),
-                                    "avg_cost": float(avg_cost),
-                                    "cost": float(cost + fee),
-                                    "type": "add",
-                                    "layer": int(add_count),
-                                    "trigger_price": float(trigger_price),
-                                }
-                            )
+                            event_type = "add"
+                            event_shares = int(shares)
+                            event_note = None
                             max_capital_used = max(max_capital_used, position_cost)
                             t1_guard.add(date, shares)
                             if max_adds > 0 and add_count >= max_adds:
                                 can_add_more = False
 
         equity.iloc[i] = cash + position * price
+
+        if position > 0 or event_type in {"exit", "entry", "add", "skip"}:
+            avg_cost_snapshot = float(position_cost / position) if position > 0 else None
+            trigger_snapshot = compute_trigger_price() if position > 0 else None
+            append_event(
+                {
+                    "date": date,
+                    "price": float(price),
+                    "shares": int(event_shares) if event_type in {"entry", "add"} else 0,
+                    "total_shares": int(position),
+                    "avg_cost": avg_cost_snapshot,
+                    "type": event_type or "record",
+                    "layer": int(add_count) if position > 0 else None,
+                    "note": event_note,
+                    "trigger_price": float(trigger_snapshot) if trigger_snapshot is not None else None,
+                }
+            )
 
     if position > 0 and entry_idx is not None:
         date = idx[-1]
