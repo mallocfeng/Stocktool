@@ -15,7 +15,7 @@ const props = defineProps({
 
 const emit = defineEmits(['selectStrategy']);
 
-const categories = [
+const baseCategories = [
   { key: 'results', title: '回测结果', desc: '策略收益与回撤概览' },
   { key: 'scores', title: '指标评分', desc: '多维指标综合得分' },
   { key: 'plan', title: '仓位计划', desc: '加仓/再平衡建议' },
@@ -27,6 +27,24 @@ const categories = [
   { key: 'dynamic', title: '资金管理', desc: '投入/对冲轨迹' },
   { key: 'buyhedge', title: '买入对冲', desc: '逢跌加仓表现' },
 ];
+const dynamicAvailable = computed(() =>
+  props.results.some(
+    (entry) =>
+      entry.name === 'dynamic_capital' || Boolean(entry.result?.dynamicSummary) || Boolean(entry.result?.equityCurveWithDynamicFund),
+  ),
+);
+const buyHedgeAvailable = computed(() =>
+  props.results.some(
+    (entry) => entry.name === 'buy_hedge' || Boolean(entry.result?.buyHedgeSummary) || Boolean(entry.result?.buyHedgeEvents?.length),
+  ),
+);
+const visibleCategories = computed(() =>
+  baseCategories.filter((item) => {
+    if (item.key === 'dynamic') return dynamicAvailable.value;
+    if (item.key === 'buyhedge') return buyHedgeAvailable.value;
+    return true;
+  }),
+);
 
 const activeTab = ref('results');
 const loading = ref(false);
@@ -1062,16 +1080,16 @@ const isCategoryDisabled = (key) => {
 
 <template>
   <div class="analytics-panel card">
-    <div class="category-row">
-      <button
-        v-for="item in categories"
-        :key="item.key"
-        class="category-card"
-        :class="{ active: activeTab === item.key }"
-        :data-key="item.key"
-        :disabled="isCategoryDisabled(item.key)"
-        @click="switchTab(item.key)"
-      >
+      <div class="category-row">
+        <button
+          v-for="item in visibleCategories"
+          :key="item.key"
+          class="category-card"
+          :class="{ active: activeTab === item.key }"
+          :data-key="item.key"
+          :disabled="isCategoryDisabled(item.key)"
+          @click="switchTab(item.key)"
+        >
         <span class="category-label">{{ item.title }}</span>
         <p>{{ item.desc }}</p>
       </button>
