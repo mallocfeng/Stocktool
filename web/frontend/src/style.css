@@ -1643,8 +1643,8 @@ label {
   position: absolute;
   top: 12px;
   left: calc(100% - 12px);
-  width: 420px;
-  max-width: 90vw;
+  width: min(504px, 92vw);
+  max-width: 92vw;
   max-height: calc(100% - 24px);
   margin: 0;
   background: linear-gradient(165deg, rgba(var(--surface-rgb), 0.9), rgba(var(--surface-rgb), 0.65));
@@ -2006,11 +2006,14 @@ label {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  width: min(100%, 504px);
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .dynamic-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 8px;
 }
 
