@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import axios from 'axios';
 import { marked } from 'marked';
 import { useRouter } from 'vue-router';
@@ -53,6 +53,16 @@ const goAdmin = () => {
   router.push({ path: '/admin' });
 };
 const { themeMode, resolvedTheme, themeOptions, setThemeMode } = useTheme();
+const themeToggleRef = ref(null);
+const themeIndicator = ref({ left: 24, width: 42 });
+const themeIndicatorAnimating = ref(false);
+let themeIndicatorTimer = null;
+const THEME_INDICATOR_OFFSET = -1;
+
+const themeIndicatorStyle = computed(() => ({
+  '--theme-indicator-left': `${themeIndicator.value.left}px`,
+  '--theme-indicator-width': `${themeIndicator.value.width}px`,
+}));
 
 const overlayActive = computed(() => isRunning.value || overlayBlocking.value);
 const overlayTitle = computed(() => {
@@ -129,14 +139,43 @@ const handleDatasetSignature = (data) => {
   }
 };
 
+const updateThemeIndicator = async () => {
+  await nextTick();
+  const toggle = themeToggleRef.value;
+  if (!toggle) return;
+  const activeChip = toggle.querySelector('.theme-chip.active');
+  if (!activeChip) return;
+  const toggleRect = toggle.getBoundingClientRect();
+  const chipRect = activeChip.getBoundingClientRect();
+  const left = chipRect.left - toggleRect.left + chipRect.width / 2 + THEME_INDICATOR_OFFSET;
+  const width = Math.max(chipRect.width + 8, 36);
+  themeIndicator.value = { left, width };
+};
+
 watch(hasData, (value) => {
   if (value) {
     showTopTip.value = false;
   }
 });
 
+watch(themeMode, () => {
+  updateThemeIndicator();
+  themeIndicatorAnimating.value = true;
+  clearTimeout(themeIndicatorTimer);
+  themeIndicatorTimer = setTimeout(() => {
+    themeIndicatorAnimating.value = false;
+  }, 600);
+});
+
 onMounted(() => {
   loadPersistedAIInsight();
+  updateThemeIndicator();
+  window.addEventListener('resize', updateThemeIndicator);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateThemeIndicator);
+  clearTimeout(themeIndicatorTimer);
 });
 
 const handleOverlayBlock = (info) => {
@@ -376,7 +415,14 @@ const handleAIMouseLeave = () => {
           <button class="secondary danger" type="button" @click="handleLogout">退出登录</button>
           <button v-if="showAdminLink" class="secondary" type="button" @click="goAdmin">管理员后台</button>
         </div>
-        <div class="theme-toggle" role="group" aria-label="颜色模式">
+        <div
+          class="theme-toggle"
+          role="group"
+          aria-label="颜色模式"
+          ref="themeToggleRef"
+          :style="themeIndicatorStyle"
+          :class="{ 'theme-toggle--animating': themeIndicatorAnimating }"
+        >
           <div class="theme-options">
             <button
               v-for="option in themeOptions"
