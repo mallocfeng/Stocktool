@@ -350,9 +350,18 @@ const handleAIMouseLeave = () => {
     </transition>
 
     <header class="app-header">
-      <div>
-        <h1>StockTool 云端量化 V1.0.7</h1>
-        <p>一键上传 CSV · 自动回测 · 智能洞察</p>
+      <div class="header-hero">
+        <div class="header-title">
+          <div class="title-bar" aria-hidden="true"></div>
+          <h1>
+            StockTool 云端量化
+            <span class="header-chip">V1.0.7</span>
+          </h1>
+        </div>
+        <p class="header-subtitle">
+          <span class="subtitle-dot" aria-hidden="true"></span>
+          一键上传 CSV · 自动回测 · 智能洞察
+        </p>
       </div>
       <div class="header-actions">
         <div v-if="showUserInfo" class="user-actions">
