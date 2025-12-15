@@ -427,12 +427,28 @@ const renderBuyHedgePriceChart = () => {
       },
     },
     legend: { data: ['触发价', '事件价格', '持仓均价', '价差(分)'], bottom: 12 },
-    grid: { left: 50, right: 20, top: 20, bottom: 110 },
+    grid: { left: 50, right: 20, top: 52, bottom: 110 },
     xAxis: { type: 'category', boundaryGap: false, data: dates, axisLabel: { margin: 18 } },
     yAxis: [
       { type: 'value', name: '价格', scale: true },
-      { type: 'value', name: '持仓（手）', scale: true, splitLine: { show: false }, position: 'right' },
-      { type: 'value', name: '价差(分)', scale: true, splitLine: { show: false }, position: 'right', offset: 60 },
+      {
+        type: 'value',
+        name: '持仓（手）',
+        scale: true,
+        splitLine: { show: false },
+        position: 'right',
+        nameGap: 40,
+        nameLocation: 'middle',
+      },
+      {
+        type: 'value',
+        name: '价差(分)',
+        scale: true,
+        splitLine: { show: false },
+        position: 'right',
+        nameGap: 70,
+        nameLocation: 'middle',
+      },
     ],
     series: [
       { name: '触发价', type: 'line', data: triggerLine, smooth: true },
@@ -1095,6 +1111,236 @@ const formatHandsValue = (val) => {
   if (!Number.isFinite(num)) return '--';
   return Math.round(num);
 };
+const formatMaybeHands = (val) => {
+  const num = Number(val);
+  if (!Number.isFinite(num)) return null;
+  return formatHands(num);
+};
+const formatSharesToHands = (shares) => {
+  const num = Number(shares);
+  if (!Number.isFinite(num)) return null;
+  return formatHands(num / lotSize);
+};
+const chooseHandsLabel = (primary, fallbackShares) => {
+  return formatMaybeHands(primary) ?? formatSharesToHands(fallbackShares) ?? '--';
+};
+const getSummaryValue = (summary, ...keys) => {
+  if (!summary) return undefined;
+  for (const key of keys) {
+    if (summary[key] !== undefined && summary[key] !== null) {
+      return summary[key];
+    }
+  }
+  return undefined;
+};
+const indicatorLabelMap = {
+  rsi: 'RSI',
+  macd: 'MACD',
+  kdj: 'KDJ',
+  ma_turn: '均线拐头',
+  price_pattern: '价格形态',
+};
+const buyHedgeStepLabel = (summary) => {
+  if (!summary) return '--';
+  const stepMode = getSummaryValue(summary, 'step_mode', 'stepMode') || 'fixed';
+  if (stepMode === 'auto') {
+    const auto = summary.step_auto || summary.stepAuto || {};
+    const method = auto.method || 'atr';
+    const methodNames = {
+      atr: 'ATR',
+      avg_range: '平均真实波幅',
+      stddev: '标准差',
+      ma_gap: '均线乖离',
+    };
+    const period =
+      getSummaryValue(auto, 'atr_period', 'atrPeriod') ||
+      getSummaryValue(auto, 'avg_range_length', 'avgRangeLength') ||
+      getSummaryValue(auto, 'std_period', 'stdPeriod') ||
+      getSummaryValue(auto, 'ma_gap_period', 'maGapPeriod');
+    const multiplier =
+      getSummaryValue(auto, 'atr_multiplier', 'atrMultiplier') ||
+      getSummaryValue(auto, 'avg_range_multiplier', 'avgRangeMultiplier') ||
+      getSummaryValue(auto, 'std_multiplier', 'stdMultiplier') ||
+      getSummaryValue(auto, 'ma_gap_pct', 'maGapPct');
+    const parts = [];
+    if (period) parts.push(`N=${period}`);
+    if (multiplier != null) parts.push(`×${multiplier}`);
+    return `${methodNames[method] || method}${parts.length ? ` (${parts.join(' · ')})` : ''}`;
+  }
+  const stepType = getSummaryValue(summary, 'step_type', 'stepType') || 'percent';
+  if (stepType === 'absolute') {
+    const abs = getSummaryValue(summary, 'step_abs', 'stepAbs');
+    const rounding = getSummaryValue(summary, 'step_rounding', 'stepRounding');
+    return `${abs != null ? formatAmount(abs) : '--'}${rounding ? ` (${rounding})` : ''}`;
+  }
+  const pct = getSummaryValue(summary, 'step_pct', 'stepPct');
+  return pct != null ? formatPercent(pct) : '--';
+};
+const buyHedgeGrowthLabel = (summary) => {
+  if (!summary) return '--';
+  const growth = summary.growth || {};
+  const mode =
+    getSummaryValue(growth, 'mode', 'growthMode', 'growth_mode') ||
+    getSummaryValue(summary, 'mode') ||
+    'equal';
+  const modeLabels = { equal: '等长', increment: '递增', double: '加倍' };
+  if (mode === 'increment') {
+    const base = getSummaryValue(growth, 'increment_base', 'incrementBase') ?? getSummaryValue(summary, 'start_position', 'startPosition');
+    const step = getSummaryValue(growth, 'increment_step', 'incrementStep') ?? getSummaryValue(summary, 'increment_unit', 'incrementUnit');
+    const baseLabel = chooseHandsLabel(getSummaryValue(growth, 'increment_base', 'incrementBase'), getSummaryValue(summary, 'start_position', 'startPosition'));
+    const stepLabel = chooseHandsLabel(getSummaryValue(growth, 'increment_step', 'incrementStep'), getSummaryValue(summary, 'increment_unit', 'incrementUnit'));
+    return `${modeLabels.increment} ${baseLabel} 起 + ${stepLabel} 递增`;
+  }
+  if (mode === 'double') {
+    const baseLabel = chooseHandsLabel(getSummaryValue(growth, 'double_base', 'doubleBase'), getSummaryValue(summary, 'start_position', 'startPosition'));
+    return `${modeLabels.double} ${baseLabel} 起`;
+  }
+  const equalLabel = chooseHandsLabel(getSummaryValue(growth, 'equal_hands', 'equalHands'), getSummaryValue(summary, 'start_position', 'startPosition'));
+  return `${modeLabels.equal} ${equalLabel}`;
+};
+const isZeroPercent = (val) => {
+  if (val == null) return true;
+  const num = Number(val);
+  return !Number.isFinite(num) || Math.abs(num) < 1e-9;
+};
+
+const buyHedgePositionLabel = (summary) => {
+  if (!summary) return '--';
+  const position = summary.position || {};
+  const mode = getSummaryValue(position, 'mode') || 'fixed';
+  if (mode === 'increment') {
+    return `递增 ${formatPercent(getSummaryValue(position, 'inc_start_pct', 'incStartPct'))} 起 + ${formatPercent(
+      getSummaryValue(position, 'inc_step_pct', 'incStepPct')
+    )} 递增`;
+  }
+  const fixedPct = getSummaryValue(position, 'fixed_pct', 'fixedPct');
+  if (isZeroPercent(fixedPct)) {
+    return '未设置仓位';
+  }
+  return `固定 ${formatPercent(fixedPct)}`;
+};
+const buyHedgeEntryLabel = (summary) => {
+  if (!summary) return '--';
+  const entry = summary.entry || {};
+  const mode = getSummaryValue(entry, 'mode') || 'none';
+  const entryFast = getSummaryValue(entry, 'ma_fast', 'maFast', 'fast');
+  const entrySlow = getSummaryValue(entry, 'ma_slow', 'maSlow', 'slow');
+  const viewPair = `${entryFast || '--'}/${entrySlow || '--'}`;
+  const progressiveCount = getSummaryValue(entry, 'progressive_count', 'progressiveCount') ?? 0;
+  if (mode === 'ma_progressive') {
+    return `MA ${viewPair} 连续 ${progressiveCount} 根`;
+  }
+  if (mode === 'ma') {
+    return `MA ${viewPair} 上穿`;
+  }
+  return '无 MA 限制';
+};
+const buyHedgeProfitBaseLabel = (key) => {
+  if (key === 'last') return '最后一笔';
+  if (key === 'batch') return '分批单';
+  return '整体均价';
+};
+const buyHedgeProfitLabel = (summary) => {
+  if (!summary) return '--';
+  const profit = summary.profit || {};
+  const mode = getSummaryValue(profit, 'mode') || 'percent';
+  const reference = getSummaryValue(profit, 'reference') || 'overall';
+  const targetPct = getSummaryValue(profit, 'target_pct', 'targetPct');
+  const targetAbs = getSummaryValue(profit, 'target_abs', 'targetAbs');
+  const value = mode === 'percent' ? formatPercent(targetPct ?? 0) : formatAmount(targetAbs ?? 0);
+  return `${mode === 'percent' ? '百分比' : '绝对价差'} ${value} (${buyHedgeProfitBaseLabel(reference)})`;
+};
+const buyHedgeReverseLabel = (summary) => {
+  if (!summary) return '--';
+  const reverse = summary.reverse || {};
+  if (!reverse.enabled) return '未启用';
+  const indicator = indicatorLabelMap[getSummaryValue(reverse, 'indicator')] || getSummaryValue(reverse, 'indicator') || '反转指标';
+  const action = getSummaryValue(reverse, 'action') === 'adjust' ? '调整止盈' : '立即离场';
+  const filterMode = getSummaryValue(reverse, 'filter_mode', 'filterMode');
+  const filterValue = getSummaryValue(reverse, 'filter_value', 'filterValue') ?? getSummaryValue(reverse, 'interval') ?? 0;
+  const minHits = getSummaryValue(reverse, 'min_hits', 'minHits') ?? 0;
+  const filterDesc =
+    filterMode === 'at_least' ? `过去 ${filterValue} 根至少 ${minHits} 次` : `连续 ${filterValue} 根`;
+  const profitValue =
+    getSummaryValue(reverse, 'profit_type', 'profitType') === 'absolute'
+      ? formatAmount(getSummaryValue(reverse, 'profit_value', 'profitValue'))
+      : formatPercent(getSummaryValue(reverse, 'profit_value', 'profitValue'));
+  const threshold = getSummaryValue(reverse, 'threshold');
+  return `${indicator} ${action} / ${filterDesc} / 阈值 ${threshold ?? '-'} / 反转盈利 ${profitValue}`;
+};
+const buyHedgeHedgeLabel = (summary) => {
+  if (!summary) return '--';
+  const hedge = summary.hedge || {};
+  const mode = getSummaryValue(hedge, 'mode') || 'full';
+  const status = hedge.enabled
+    ? mode === 'weak'
+      ? '弱对冲（仅止损/退出）'
+      : '反向仓对冲'
+    : '未启用对冲';
+  const repeat = getSummaryValue(summary, 'allow_repeat', 'allowRepeat') ? '清仓后可重启' : '达成后不重启';
+  return `${status} / ${repeat}`;
+};
+const buyHedgeCapitalLabel = (summary) => {
+  if (!summary) return '--';
+  const capital = summary.capital || {};
+  const mode = getSummaryValue(capital, 'mode') || 'unlimited';
+  if (mode === 'fixed') {
+    const amount = getSummaryValue(capital, 'fixed_amount', 'fixedAmount');
+    const percent = getSummaryValue(capital, 'fixed_percent', 'fixedPercent');
+    const amountText = amount != null ? formatAmount(amount) : '--';
+    const percentText = percent != null ? formatPercent(percent) : null;
+    return `固定 ${amountText}${percentText ? ` / ${percentText}` : ''}`;
+  }
+  if (mode === 'increment') {
+    const startPct = formatPercent(getSummaryValue(capital, 'increment_start', 'incrementStart') ?? 0);
+    const stepPct = formatPercent(getSummaryValue(capital, 'increment_step', 'incrementStep') ?? 0);
+    return `递增 ${startPct} 起 + ${stepPct} 递增`;
+  }
+  return '不限';
+};
+const buyHedgeExitLabel = (summary) => {
+  if (!summary) return '--';
+  const exit = summary.exit || {};
+  const mode = getSummaryValue(exit, 'mode') || 'batch';
+  if (mode === 'single') {
+    const type = getSummaryValue(exit, 'single_type', 'singleType');
+    return `带单 ${type === 'limit' ? '限价' : '市价'} 清仓`;
+  }
+  const pct = formatPercent(getSummaryValue(exit, 'batch_pct', 'batchPct') ?? 0);
+  const strategy = getSummaryValue(exit, 'batch_strategy', 'batchStrategy');
+  const stepPct = formatPercent(getSummaryValue(exit, 'batch_step_pct', 'batchStepPct') ?? 0);
+  const strategyLabel =
+    strategy === 'per_step' ? '每上涨一个步长' : strategy === 'ratio' ? '固定比例' : '按持仓批次';
+  return `分批 ${pct} / ${strategyLabel} / 每步卖出 ${stepPct}`;
+};
+const buyHedgeLimitsLabel = (summary) => {
+  if (!summary) return '--';
+  const limits = summary.limits || {};
+  const parts = [];
+  const buyPrice = getSummaryValue(limits, 'limit_buy_price', 'limitBuyPrice');
+  const sellPrice = getSummaryValue(limits, 'limit_sell_price', 'limitSellPrice');
+  const minPrice = getSummaryValue(limits, 'min_price', 'minPrice');
+  if (buyPrice != null) parts.push(`限买 ≤ ${formatAmount(buyPrice)}`);
+  if (sellPrice != null) parts.push(`限平 ≥ ${formatAmount(sellPrice)}`);
+  if (minPrice != null) parts.push(`最低价 ${formatAmount(minPrice)}`);
+  return parts.length ? parts.join(' / ') : '无';
+};
+const formatBuyHedgeTradeTag = (row) => {
+  if (!row) return '--';
+  const tags = [];
+  const hedgeActive = Boolean(row.hedge_active);
+  const mode = (row.hedge_mode || 'full').toLowerCase();
+  if (hedgeActive) {
+    const label = mode === 'weak' ? '弱对冲' : '反向对冲';
+    tags.push(label);
+  } else {
+    tags.push('主方向');
+  }
+  if (Boolean(row.allow_repeat)) {
+    tags.push('清仓后重启');
+  }
+  return tags.join(' / ');
+};
 const summaryTone = (val, invert = false) => {
   const num = Number(val);
   if (!Number.isFinite(num) || num === 0) return '';
@@ -1194,21 +1440,6 @@ watch(
   }
 );
 
-const buyHedgeModeLabel = (mode) => {
-  const map = { equal: '等量', increment: '递增', double: '加倍' };
-  return map[mode] || mode || '-';
-};
-const buyHedgeReferenceLabel = (reference) => {
-  if (reference === 'first') return '首次买入价';
-  return '上一笔买入价';
-};
-const formatBuyHedgeLimit = (summary) => {
-  if (!summary) return '--';
-  if (summary.max_capital_input) return summary.max_capital_input;
-  if (summary.max_capital_value != null) return formatAmount(summary.max_capital_value);
-  if (summary.max_capital_ratio != null) return formatPercent(summary.max_capital_ratio);
-  return '--';
-};
 const buyHedgeEventLabel = (type) => {
   const map = { entry: '首次买入', add: '加仓', skip: '跳过' };
   return map[type] || '记录';
@@ -1634,15 +1865,16 @@ const isCategoryDisabled = (key) => {
             <div class="summary-card">
               <h4>参数配置</h4>
               <ul>
-                <li><span>步长</span><strong>{{ formatPercent(buyHedgeSummary.step_pct) }}</strong></li>
-                <li><span>模式</span><strong>{{ buyHedgeModeLabel(buyHedgeSummary.mode) }}</strong></li>
-                <li><span>起始仓位</span><strong>{{ formatHands(buyHedgeSummary.start_position) }}</strong></li>
-                <li v-if="buyHedgeSummary.mode === 'increment'">
-                  <span>递增单位</span><strong>{{ formatHands(buyHedgeSummary.increment_unit) }}</strong>
-                </li>
-                <li><span>触发基准</span><strong>{{ buyHedgeReferenceLabel(buyHedgeSummary.reference) }}</strong></li>
-                <li><span>最大加仓次数</span><strong>{{ buyHedgeSummary.max_adds > 0 ? buyHedgeSummary.max_adds : '无限制' }}</strong></li>
-                <li><span>资金占用上限</span><strong>{{ formatBuyHedgeLimit(buyHedgeSummary) }}</strong></li>
+                <li><span>步长</span><strong>{{ buyHedgeStepLabel(buyHedgeSummary) }}</strong></li>
+                <li><span>增长模式</span><strong>{{ buyHedgeGrowthLabel(buyHedgeSummary) }}</strong></li>
+                <li><span>仓位设置</span><strong>{{ buyHedgePositionLabel(buyHedgeSummary) }}</strong></li>
+                <li><span>开仓条件</span><strong>{{ buyHedgeEntryLabel(buyHedgeSummary) }}</strong></li>
+                <li><span>止盈参考</span><strong>{{ buyHedgeProfitLabel(buyHedgeSummary) }}</strong></li>
+                <li><span>反转指标</span><strong>{{ buyHedgeReverseLabel(buyHedgeSummary) }}</strong></li>
+                <li><span>对冲 / 重启</span><strong>{{ buyHedgeHedgeLabel(buyHedgeSummary) }}</strong></li>
+                <li><span>资金 & 限制</span><strong>{{ buyHedgeCapitalLabel(buyHedgeSummary) }}</strong></li>
+                <li><span>离场策略</span><strong>{{ buyHedgeExitLabel(buyHedgeSummary) }}</strong></li>
+                <li><span>限价 / 最低价</span><strong>{{ buyHedgeLimitsLabel(buyHedgeSummary) }}</strong></li>
               </ul>
             </div>
             <div class="summary-card">
@@ -1680,21 +1912,26 @@ const isCategoryDisabled = (key) => {
                     <tr>
                       <th>开仓时间</th>
                       <th>平仓时间</th>
+                      <th>开仓价</th>
+                      <th>平仓价</th>
+                      <th>数量（手）</th>
                       <th>加仓次数</th>
-                      <th>持仓（手）</th>
                       <th>平均成本</th>
-                      <th>资金投入</th>
+                      <th>成交金额</th>
                       <th>平均摊低</th>
                       <th>盈亏</th>
                       <th>收益率</th>
+                      <th>标签</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr v-for="row in buyHedgeTrades" :key="row.trade_id || row.entry_date">
                       <td>{{ row.entry_date }}</td>
                       <td>{{ row.exit_date }}</td>
-                      <td>{{ row.adds ?? 0 }}</td>
+                      <td>{{ formatAmount(row.entry_price) }}</td>
+                      <td>{{ formatAmount(row.exit_price) }}</td>
                       <td>{{ formatHandsValue(row.total_shares) }}</td>
+                      <td>{{ row.adds ?? 0 }}</td>
                       <td>{{ formatAmount(row.avg_cost) }}</td>
                       <td>{{ formatAmount(row.capital_used) }}</td>
                       <td>{{ formatPercent(row.avg_cost_delta_pct ?? 0) }}</td>
@@ -1702,6 +1939,7 @@ const isCategoryDisabled = (key) => {
                       <td :class="(row.return_pct ?? 0) >= 0 ? 'positive' : 'negative'">
                         {{ formatPercent(row.return_pct ?? 0) }}
                       </td>
+                      <td>{{ formatBuyHedgeTradeTag(row) }}</td>
                     </tr>
                   </tbody>
                 </table>

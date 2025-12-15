@@ -63,13 +63,81 @@ const config = reactive({
     },
     buyHedge: {
       enabled: false,
-      stepType: 'percent',
-      stepValue: 3,
-      mode: 'equal',
-      startPosition: 1,
-      incrementUnit: 1,
+      hedge: {
+        enabled: false,
+        mode: 'full',
+      },
+      allowRepeatAfterExit: true,
+      stepMode: 'fixed',
+      stepFixedType: 'percent',
+      stepFixedValue: 3,
+      stepAbsoluteValue: 1,
+      stepAbsoluteRounding: 'round',
+      stepAuto: {
+        method: 'atr',
+        atrPeriod: 14,
+        atrMultiplier: 1.0,
+        avgRangeLength: 5,
+        avgRangeMultiplier: 1.0,
+        stdPeriod: 20,
+        stdMultiplier: 1.0,
+        maFast: 5,
+        maSlow: 20,
+        maGapPct: 1,
+      },
+      growthMode: 'equal',
+      growthEqualHands: 1,
+      growthIncrementVariant: 'arithmetic',
+      growthIncrementBase: 1,
+      growthIncrementStep: 1,
+      growthIncrementFlexibleStep: 50,
+      growthDoubleBase: 1,
+      positionMode: 'fixed',
+      positionFixedPct: '',
+      positionIncrementStartPct: '',
+      positionIncrementStepPct: '',
+      entryMode: 'none',
+      entryMaFast: 5,
+      entryMaSlow: 10,
+      entryMaPeriod: 20,
+      entryProgressiveCount: 3,
+      profitMode: 'percent',
+      profitTargetPercent: 5,
+      profitTargetAbsolute: 0,
+      profitBase: 'overall',
+      profitBatch: false,
+      reverse: {
+        enabled: false,
+        indicator: 'rsi',
+        interval: 5,
+        filterMode: 'consecutive',
+        filterValue: 3,
+        minHits: 2,
+        action: 'exit',
+        profitType: 'percent',
+        profitValue: 2,
+        threshold: 30,
+      },
+      capitalMode: 'unlimited',
+      capitalFixedAmount: '',
+      capitalFixedPercent: '',
+      capitalIncrementStart: '',
+      capitalIncrementStep: '',
+      exitMode: 'batch',
+      exitBatchPct: 50,
+      exitBatchStrategy: 'per_batch',
+      exitBatchStepPct: 25,
+      exitSingleType: 'market',
+      limits: {
+        limitBuyPrice: '',
+        limitSellPrice: '',
+        minPrice: '',
+        stopAddingAtMin: false,
+      },
+      baseInitialHands: '',
+      baseReferencePrice: '',
+      baseReferenceSource: 'first',
       maxAddCount: 5,
-      maxCapital: '',
       reference: 'last',
     },
   },
@@ -429,17 +497,11 @@ const buildStrategiesPayload = () => {
     const num = Number(input);
     return Number.isFinite(num) ? num : null;
   };
-  const parseMoneyOrPercent = (input) => {
-    if (input === null || input === undefined) return { raw: '', value: null, ratio: null };
-    const raw = String(input).trim();
-    if (!raw) return { raw: '', value: null, ratio: null };
-    if (raw.endsWith('%')) {
-      const num = Number(raw.slice(0, -1));
-      if (Number.isFinite(num)) return { raw, value: null, ratio: num / 100 };
-      return { raw, value: null, ratio: null };
-    }
-    const num = Number(raw);
-    return Number.isFinite(num) ? { raw, value: num, ratio: null } : { raw, value: null, ratio: null };
+  const parseOptionalNumber = (input) => {
+    if (input === null || input === undefined) return null;
+    if (typeof input === 'string' && !input.trim()) return null;
+    const num = Number(input);
+    return Number.isFinite(num) ? num : null;
   };
   if (config.strategies.fixed.enabled) {
     const parts = config.strategies.fixed.periods
@@ -493,30 +555,131 @@ const buildStrategiesPayload = () => {
     strategies.dynamic = dynamicCfg;
   }
   if (config.strategies.buyHedge?.enabled) {
-    const stepRatio = toRatio(config.strategies.buyHedge.stepValue);
-    const startHands = Math.max(0, toNumber(config.strategies.buyHedge.startPosition));
-    const toShares = (hands) => {
-      const normalized = Number.isFinite(hands) ? Math.floor(hands) : 0;
-      if (normalized <= 0) return 0;
-      return normalized * LOT_SIZE;
+    const bh = config.strategies.buyHedge;
+    const normalizeHands = (value) => {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return 0;
+      return Math.max(0, Math.floor(num));
     };
+    const toShares = (hands) => {
+      const normalized = normalizeHands(hands);
+      return normalized <= 0 ? 0 : normalized * LOT_SIZE;
+    };
+    const growthMode = bh.growthMode || 'equal';
+    let startHands = 0;
+    if (growthMode === 'equal') {
+      startHands = toNumber(bh.growthEqualHands);
+    } else if (growthMode === 'increment') {
+      startHands = toNumber(bh.growthIncrementBase);
+    } else {
+      startHands = toNumber(bh.growthDoubleBase);
+    }
+    let incrementHands = 0;
+    if (growthMode === 'increment') {
+      incrementHands = toNumber(bh.growthIncrementStep);
+    } else if (growthMode === 'double') {
+      incrementHands = toNumber(bh.growthDoubleBase);
+    }
     const startShares = toShares(startHands);
-    if (stepRatio > 0 && startShares >= LOT_SIZE) {
-      const maxCapParsed = parseMoneyOrPercent(config.strategies.buyHedge.maxCapital);
-      const incrementHands = Math.max(0, toNumber(config.strategies.buyHedge.incrementUnit));
-      const incrementShares = toShares(incrementHands);
+    const incrementShares = toShares(incrementHands);
+    if (startShares >= LOT_SIZE) {
+      const stepType = bh.stepFixedType || 'percent';
+      const stepPct = stepType === 'percent' ? toRatio(bh.stepFixedValue) : 0;
+      const stepAbs = stepType === 'absolute' ? toNumber(bh.stepAbsoluteValue) : 0;
       const buyHedgeCfg = {
-        step_type: config.strategies.buyHedge.stepType || 'percent',
-        step_pct: stepRatio,
-        mode: config.strategies.buyHedge.mode || 'equal',
+        hedge: {
+          enabled: Boolean(bh.hedge?.enabled),
+          mode: bh.hedge?.mode || 'full',
+        },
+        allow_repeat: Boolean(bh.allowRepeatAfterExit),
+        step_mode: bh.stepMode || 'fixed',
+        step_type: stepType,
+        step_pct: stepPct,
+        step_abs: stepAbs,
+        step_rounding: bh.stepAbsoluteRounding,
+        step_auto: {
+          method: bh.stepAuto?.method || 'atr',
+          atr_period: parseOptionalNumber(bh.stepAuto?.atrPeriod) ?? 0,
+          atr_multiplier: parseOptionalNumber(bh.stepAuto?.atrMultiplier) ?? 1,
+          avg_range_length: parseOptionalNumber(bh.stepAuto?.avgRangeLength) ?? 0,
+          avg_range_multiplier: parseOptionalNumber(bh.stepAuto?.avgRangeMultiplier) ?? 1,
+          std_period: parseOptionalNumber(bh.stepAuto?.stdPeriod) ?? 0,
+          std_multiplier: parseOptionalNumber(bh.stepAuto?.stdMultiplier) ?? 1,
+          ma_fast: parseOptionalNumber(bh.stepAuto?.maFast) ?? 0,
+          ma_slow: parseOptionalNumber(bh.stepAuto?.maSlow) ?? 0,
+          ma_gap_pct: parseOptionalNumber(bh.stepAuto?.maGapPct) ?? 0,
+        },
+        growth: {
+          mode: growthMode,
+          equal_hands: toNumber(bh.growthEqualHands),
+          increment_variant: bh.growthIncrementVariant || 'arithmetic',
+          increment_base: toNumber(bh.growthIncrementBase),
+          increment_step: toNumber(bh.growthIncrementStep),
+          increment_flexible: toNumber(bh.growthIncrementFlexibleStep),
+          double_base: toNumber(bh.growthDoubleBase),
+        },
+        position: {
+          mode: bh.positionMode || 'fixed',
+          fixed_pct: toNumber(bh.positionFixedPct),
+          inc_start_pct: toNumber(bh.positionIncrementStartPct),
+          inc_step_pct: toNumber(bh.positionIncrementStepPct),
+        },
+        entry: {
+          mode: bh.entryMode || 'none',
+          ma_period: toNumber(bh.entryMaPeriod),
+          ma_fast: toNumber(bh.entryMaFast),
+          ma_slow: toNumber(bh.entryMaSlow),
+          progressive_count: parseInt(bh.entryProgressiveCount, 10) || 0,
+        },
+        profit: {
+          mode: bh.profitMode || 'percent',
+          target_pct: toRatio(bh.profitTargetPercent),
+          target_abs: toNumber(bh.profitTargetAbsolute),
+          reference: bh.profitBase || 'overall',
+          per_batch: Boolean(bh.profitBatch),
+        },
+        reverse: {
+          enabled: Boolean(bh.reverse?.enabled),
+          indicator: bh.reverse?.indicator || 'rsi',
+          interval: parseInt(bh.reverse?.interval, 10) || 0,
+          filter_mode: bh.reverse?.filterMode || 'consecutive',
+          filter_value: parseInt(bh.reverse?.filterValue, 10) || 0,
+          min_hits: parseInt(bh.reverse?.minHits, 10) || 0,
+          threshold: toNumber(bh.reverse?.threshold),
+          action: bh.reverse?.action || 'exit',
+          profit_type: bh.reverse?.profitType || 'percent',
+          profit_value: toNumber(bh.reverse?.profitValue),
+        },
+        capital: {
+          mode: bh.capitalMode || 'unlimited',
+          fixed_amount: parseOptionalNumber(bh.capitalFixedAmount),
+          fixed_percent: parseOptionalNumber(bh.capitalFixedPercent),
+          increment_start: parseOptionalNumber(bh.capitalIncrementStart),
+          increment_step: parseOptionalNumber(bh.capitalIncrementStep),
+        },
+        exit: {
+          mode: bh.exitMode || 'batch',
+          batch_pct: toNumber(bh.exitBatchPct),
+          batch_strategy: bh.exitBatchStrategy || 'per_batch',
+          batch_step_pct: toNumber(bh.exitBatchStepPct),
+          single_type: bh.exitSingleType || 'market',
+        },
+        limits: {
+          limit_buy_price: parseOptionalNumber(bh.limits?.limitBuyPrice),
+          limit_sell_price: parseOptionalNumber(bh.limits?.limitSellPrice),
+          min_price: parseOptionalNumber(bh.limits?.minPrice),
+          stop_adding_at_min: Boolean(bh.limits?.stopAddingAtMin),
+        },
+        base: {
+          initial_hands: toNumber(bh.baseInitialHands),
+          reference_price: toNumber(bh.baseReferencePrice),
+          reference_source: bh.baseReferenceSource || 'first',
+        },
         start_position: startShares,
         increment_unit: incrementShares,
-        max_adds: parseInt(config.strategies.buyHedge.maxAddCount, 10) || 0,
-        reference: config.strategies.buyHedge.reference || 'last',
+        max_adds: parseInt(bh.maxAddCount, 10) || 0,
+        reference: bh.reference || 'last',
       };
-      if (maxCapParsed.value != null) buyHedgeCfg.max_capital = maxCapParsed.value;
-      if (maxCapParsed.ratio != null) buyHedgeCfg.max_capital_ratio = maxCapParsed.ratio;
-      if (maxCapParsed.raw) buyHedgeCfg.max_capital_input = maxCapParsed.raw;
       strategies.buy_hedge = buyHedgeCfg;
     }
   }
@@ -801,6 +964,20 @@ const runBacktest = () => {
                         <input type="number" v-model="config.strategies.dynamic.hedgeMaxAddSteps" min="0" />
                       </label>
                     </div>
+                    <div class="sub-grid">
+                      <label class="field">
+                        <span>最大加仓次数</span>
+                        <input type="number" min="0" v-model="config.strategies.buyHedge.maxAddCount" />
+                        <small class="field-hint">0 表示不限制加仓层数</small>
+                      </label>
+                      <label class="field">
+                        <span>触发基准</span>
+                        <select v-model="config.strategies.buyHedge.reference">
+                          <option value="last">以上一笔买入价</option>
+                          <option value="first">以首次买入价</option>
+                        </select>
+                      </label>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -812,59 +989,532 @@ const runBacktest = () => {
                 </label>
                 <div class="buyhedge-sections" v-if="config.strategies.buyHedge.enabled">
                   <div class="buyhedge-section">
-                    <div class="buyhedge-section__title">触发条件</div>
+                    <div class="buyhedge-section__title">对冲 & 重启</div>
                     <div class="sub-grid">
+                      <label class="checkbox-row">
+                        <input type="checkbox" v-model="config.strategies.buyHedge.hedge.enabled" />
+                        <span>启用对冲行为（反向头寸或止损/退出）</span>
+                      </label>
                       <label class="field">
-                        <span>步长类型</span>
-                        <select v-model="config.strategies.buyHedge.stepType">
-                          <option value="percent">百分比</option>
+                        <span>对冲模式</span>
+                        <select v-model="config.strategies.buyHedge.hedge.mode">
+                          <option value="full">反向仓全面对冲</option>
+                          <option value="weak">仅反向止损 / 反向退出</option>
                         </select>
                       </label>
-                      <label class="field">
-                        <span>步长 (%)</span>
-                        <input type="number" v-model="config.strategies.buyHedge.stepValue" min="0" step="0.1" />
+                      <label class="checkbox-row">
+                        <input type="checkbox" v-model="config.strategies.buyHedge.allowRepeatAfterExit" />
+                        <span>清仓后允许从开仓条件重新开始</span>
                       </label>
                     </div>
-                    <p class="field-note">价格相对基准下跌达到该比例时触发下一次加仓</p>
                   </div>
                   <div class="buyhedge-section">
-                    <div class="buyhedge-section__title">仓位配置</div>
+                    <div class="buyhedge-section__title">步长设置</div>
                     <div class="sub-grid">
                       <label class="field">
-                        <span>买入模式</span>
-                        <select v-model="config.strategies.buyHedge.mode">
-                          <option value="equal">等量</option>
+                        <span>步长来源</span>
+                        <select v-model="config.strategies.buyHedge.stepMode">
+                          <option value="fixed">固定</option>
+                          <option value="auto">自动</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div class="sub-grid" v-if="config.strategies.buyHedge.stepMode === 'fixed'">
+                      <label class="field">
+                        <span>步长单位</span>
+                        <select v-model="config.strategies.buyHedge.stepFixedType">
+                          <option value="percent">百分比</option>
+                          <option value="absolute">绝对价差</option>
+                        </select>
+                      </label>
+                      <label class="field" v-if="config.strategies.buyHedge.stepFixedType === 'percent'">
+                        <span>步长 (%)</span>
+                        <input
+                          type="number"
+                          v-model="config.strategies.buyHedge.stepFixedValue"
+                          min="0"
+                          step="0.1"
+                        />
+                      </label>
+                      <label class="field" v-else>
+                        <span>步长（价差）</span>
+                        <input
+                          type="number"
+                          v-model="config.strategies.buyHedge.stepAbsoluteValue"
+                          min="0"
+                          step="0.01"
+                        />
+                      </label>
+                      <label class="field" v-if="config.strategies.buyHedge.stepFixedType === 'absolute'">
+                        <span>价差取整规则</span>
+                        <select v-model="config.strategies.buyHedge.stepAbsoluteRounding">
+                          <option value="round">四舍五入</option>
+                          <option value="floor">向下取整</option>
+                          <option value="ceil">向上取整</option>
+                        </select>
+                      </label>
+                      <p class="field-note">A 股按最小变动单位（分）取整，避免出现不可委托价。</p>
+                    </div>
+                    <div class="sub-grid" v-else>
+                      <label class="field">
+                        <span>自动算法</span>
+                        <select v-model="config.strategies.buyHedge.stepAuto.method">
+                          <option value="atr">ATR</option>
+                          <option value="avg_range">最近 N 根平均真实波幅</option>
+                          <option value="stddev">标准差</option>
+                          <option value="ma_gap">均线乖离</option>
+                        </select>
+                      </label>
+                      <template v-if="config.strategies.buyHedge.stepAuto.method === 'atr'">
+                        <label class="field">
+                          <span>ATR 周期</span>
+                          <input type="number" min="1" v-model="config.strategies.buyHedge.stepAuto.atrPeriod" />
+                        </label>
+                        <label class="field">
+                          <span>倍数</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.1"
+                            v-model="config.strategies.buyHedge.stepAuto.atrMultiplier"
+                          />
+                        </label>
+                      </template>
+                      <template v-else-if="config.strategies.buyHedge.stepAuto.method === 'avg_range'">
+                        <label class="field">
+                          <span>平均真实波幅长度 N</span>
+                          <input
+                            type="number"
+                            min="1"
+                            v-model="config.strategies.buyHedge.stepAuto.avgRangeLength"
+                          />
+                        </label>
+                        <label class="field">
+                          <span>乘数</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.1"
+                            v-model="config.strategies.buyHedge.stepAuto.avgRangeMultiplier"
+                          />
+                        </label>
+                      </template>
+                      <template v-else-if="config.strategies.buyHedge.stepAuto.method === 'stddev'">
+                        <label class="field">
+                          <span>标准差周期</span>
+                          <input type="number" min="1" v-model="config.strategies.buyHedge.stepAuto.stdPeriod" />
+                        </label>
+                        <label class="field">
+                          <span>倍数</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.1"
+                            v-model="config.strategies.buyHedge.stepAuto.stdMultiplier"
+                          />
+                        </label>
+                      </template>
+                      <template v-else>
+                        <label class="field">
+                          <span>快线周期</span>
+                          <input
+                            type="number"
+                            min="1"
+                            v-model="config.strategies.buyHedge.stepAuto.maFast"
+                          />
+                        </label>
+                        <label class="field">
+                          <span>慢线周期</span>
+                          <input
+                            type="number"
+                            min="1"
+                            v-model="config.strategies.buyHedge.stepAuto.maSlow"
+                          />
+                        </label>
+                        <label class="field">
+                          <span>乖离阈值 (%)</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.1"
+                            v-model="config.strategies.buyHedge.stepAuto.maGapPct"
+                          />
+                        </label>
+                      </template>
+                    </div>
+                  </div>
+                  <div class="buyhedge-section">
+                    <div class="buyhedge-section__title">仓位增长 & 资金占比</div>
+                    <div class="sub-grid">
+                      <label class="field">
+                        <span>增长模式</span>
+                        <select v-model="config.strategies.buyHedge.growthMode">
+                          <option value="equal">等长（每次买入固定仓位）</option>
                           <option value="increment">递增</option>
                           <option value="double">加倍</option>
                         </select>
                       </label>
-                      <label class="field">
-                        <span>起始仓位（手）</span>
-                        <input type="number" v-model="config.strategies.buyHedge.startPosition" min="0" />
+                      <label class="field" v-if="config.strategies.buyHedge.growthMode === 'equal'">
+                        <span>固定仓位（手）</span>
+                        <input type="number" min="0" v-model="config.strategies.buyHedge.growthEqualHands" />
                       </label>
-                      <label class="field" v-if="config.strategies.buyHedge.mode === 'increment'">
-                        <span>递增单位（手）</span>
-                        <input type="number" v-model="config.strategies.buyHedge.incrementUnit" min="0" />
+                      <template v-else-if="config.strategies.buyHedge.growthMode === 'increment'">
+                        <label class="field">
+                          <span>递增类型</span>
+                          <select v-model="config.strategies.buyHedge.growthIncrementVariant">
+                            <option value="arithmetic">等差（base + k × step）</option>
+                            <option value="flexible">等差（可配置增量）</option>
+                          </select>
+                        </label>
+                        <label class="field">
+                          <span>起始仓位（手）</span>
+                          <input
+                            type="number"
+                            min="0"
+                            v-model="config.strategies.buyHedge.growthIncrementBase"
+                          />
+                        </label>
+                        <label class="field">
+                          <span>递增单位（手）</span>
+                          <input
+                            type="number"
+                            min="0"
+                            v-model="config.strategies.buyHedge.growthIncrementStep"
+                          />
+                        </label>
+                        <label class="field" v-if="config.strategies.buyHedge.growthIncrementVariant === 'flexible'">
+                          <span>可调增量（手）</span>
+                          <input
+                            type="number"
+                            min="0"
+                            v-model="config.strategies.buyHedge.growthIncrementFlexibleStep"
+                          />
+                        </label>
+                      </template>
+                      <label class="field" v-else>
+                        <span>加倍基础仓位（手）</span>
+                        <input type="number" min="0" v-model="config.strategies.buyHedge.growthDoubleBase" />
+                      </label>
+                    </div>
+                    <div class="sub-grid">
+                      <label class="field">
+                        <span>仓位量模式</span>
+                        <select v-model="config.strategies.buyHedge.positionMode">
+                          <option value="fixed">固定百分比仓位</option>
+                          <option value="increment">递增百分比仓位</option>
+                        </select>
+                      </label>
+                      <label class="field" v-if="config.strategies.buyHedge.positionMode === 'fixed'">
+                        <span>仓位占比 (%)</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          v-model="config.strategies.buyHedge.positionFixedPct"
+                        />
+                      </label>
+                      <template v-else>
+                        <label class="field">
+                          <span>起始仓位 (%)</span>
+                          <input type="number" min="0" max="100" v-model="config.strategies.buyHedge.positionIncrementStartPct" />
+                        </label>
+                        <label class="field">
+                          <span>递增 (%)</span>
+                          <input type="number" min="0" max="100" v-model="config.strategies.buyHedge.positionIncrementStepPct" />
+                        </label>
+                      </template>
+                    </div>
+                  </div>
+                  <div class="buyhedge-section">
+                    <div class="buyhedge-section__title">开仓条件</div>
+                    <div class="sub-grid">
+                      <label class="field">
+                        <span>开仓方式</span>
+                        <select v-model="config.strategies.buyHedge.entryMode">
+                          <option value="none">无 MA，任意满足策略即可首单</option>
+                          <option value="ma">MA 指标金叉 / 上穿</option>
+                          <option value="ma_progressive">MA 指标累进满足</option>
+                        </select>
+                      </label>
+                      <label class="field" v-if="config.strategies.buyHedge.entryMode !== 'none'">
+                        <span>MA 时间窗口 N</span>
+                        <input type="number" min="1" v-model="config.strategies.buyHedge.entryMaPeriod" />
+                      </label>
+                      <label class="field" v-if="config.strategies.buyHedge.entryMode !== 'none'">
+                        <span>快/慢线周期</span>
+                        <input
+                          type="number"
+                          min="1"
+                          v-model="config.strategies.buyHedge.entryMaFast"
+                        />
+                        <input
+                          type="number"
+                          min="1"
+                          v-model="config.strategies.buyHedge.entryMaSlow"
+                        />
+                      </label>
+                      <label class="field" v-if="config.strategies.buyHedge.entryMode === 'ma_progressive'">
+                        <span>连续满足次数（5 分钟 K）</span>
+                        <input
+                          type="number"
+                          min="1"
+                          v-model="config.strategies.buyHedge.entryProgressiveCount"
+                        />
                       </label>
                     </div>
                   </div>
                   <div class="buyhedge-section">
-                    <div class="buyhedge-section__title">风险限制</div>
+                    <div class="buyhedge-section__title">止盈方式</div>
                     <div class="sub-grid">
                       <label class="field">
-                        <span>最大加仓次数</span>
-                        <input type="number" v-model="config.strategies.buyHedge.maxAddCount" min="0" />
-                        <small class="field-hint">0 表示不限制加仓层数</small>
+                        <span>止盈类型</span>
+                        <select v-model="config.strategies.buyHedge.profitMode">
+                          <option value="percent">百分比止盈</option>
+                          <option value="absolute">固定价差止盈</option>
+                        </select>
+                      </label>
+                      <label class="field" v-if="config.strategies.buyHedge.profitMode === 'percent'">
+                        <span>阈值 (%)</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.1"
+                          v-model="config.strategies.buyHedge.profitTargetPercent"
+                        />
+                      </label>
+                      <label class="field" v-else>
+                        <span>阈值（价差）</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          v-model="config.strategies.buyHedge.profitTargetAbsolute"
+                        />
                       </label>
                       <label class="field">
-                        <span>最大资金占用</span>
-                        <input type="text" v-model="config.strategies.buyHedge.maxCapital" placeholder="如 50000 或 50%" />
+                        <span>参考价</span>
+                        <select v-model="config.strategies.buyHedge.profitBase">
+                          <option value="overall">整体持仓均价</option>
+                          <option value="last">最后一笔</option>
+                          <option value="batch">分批单独计算</option>
+                        </select>
+                      </label>
+                      <label class="checkbox-row">
+                        <input type="checkbox" v-model="config.strategies.buyHedge.profitBatch" />
+                        <span>分批逐笔止盈</span>
+                      </label>
+                    </div>
+                  </div>
+                  <div class="buyhedge-section">
+                    <div class="buyhedge-section__title">反转指标</div>
+                    <div class="sub-grid">
+                      <label class="checkbox-row">
+                        <input type="checkbox" v-model="config.strategies.buyHedge.reverse.enabled" />
+                        <span>启用反转信号</span>
                       </label>
                       <label class="field">
-                        <span>触发基准</span>
-                        <select v-model="config.strategies.buyHedge.reference">
-                          <option value="last">以上一笔买入价</option>
-                          <option value="first">以首次买入价</option>
+                        <span>指标</span>
+                        <select v-model="config.strategies.buyHedge.reverse.indicator">
+                          <option value="rsi">RSI</option>
+                          <option value="macd">MACD</option>
+                          <option value="kdj">KDJ</option>
+                          <option value="ma_turn">均线拐头</option>
+                          <option value="price_pattern">价格形态（新低失败）</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div class="sub-grid" v-if="config.strategies.buyHedge.reverse.enabled">
+                      <label class="field">
+                        <span>计算周期 N（5 分钟 K）</span>
+                        <input type="number" min="1" v-model="config.strategies.buyHedge.reverse.interval" />
+                      </label>
+                      <label class="field">
+                        <span>过滤方式</span>
+                        <select v-model="config.strategies.buyHedge.reverse.filterMode">
+                          <option value="consecutive">连续 N 根满足</option>
+                          <option value="at_least">过去 N 根至少满足 X 次</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>阈值 / 可视次数</span>
+                        <input type="number" min="1" v-model="config.strategies.buyHedge.reverse.filterValue" />
+                      </label>
+                      <label class="field" v-if="config.strategies.buyHedge.reverse.filterMode === 'at_least'">
+                        <span>至少满足次数</span>
+                        <input type="number" min="1" v-model="config.strategies.buyHedge.reverse.minHits" />
+                      </label>
+                      <label class="field">
+                        <span>指标触发阈值</span>
+                        <input type="number" min="0" v-model="config.strategies.buyHedge.reverse.threshold" />
+                      </label>
+                      <label class="field">
+                        <span>触发后的操作</span>
+                        <select v-model="config.strategies.buyHedge.reverse.action">
+                          <option value="exit">立刻离场</option>
+                          <option value="adjust">切换止盈 / 启动“反转盈利”</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>反转盈利类型</span>
+                        <select v-model="config.strategies.buyHedge.reverse.profitType">
+                          <option value="percent">百分比</option>
+                          <option value="absolute">固定价差</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>反转盈利阈值</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.1"
+                          v-model="config.strategies.buyHedge.reverse.profitValue"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                  <div class="buyhedge-section">
+                    <div class="buyhedge-section__title">资金控制 & 离场</div>
+                    <div class="sub-grid">
+                      <label class="field">
+                        <span>资金模式</span>
+                        <select v-model="config.strategies.buyHedge.capitalMode">
+                          <option value="unlimited">不限</option>
+                          <option value="fixed">固定</option>
+                          <option value="increment">递增</option>
+                        </select>
+                      </label>
+                      <label class="field" v-if="config.strategies.buyHedge.capitalMode === 'fixed'">
+                        <span>固定资金 (元)</span>
+                        <input type="number" min="0" v-model="config.strategies.buyHedge.capitalFixedAmount" />
+                      </label>
+                      <label class="field" v-if="config.strategies.buyHedge.capitalMode === 'fixed'">
+                        <span>或占比 (%)</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          v-model="config.strategies.buyHedge.capitalFixedPercent"
+                        />
+                      </label>
+                      <template v-else-if="config.strategies.buyHedge.capitalMode === 'increment'">
+                        <label class="field">
+                          <span>起始仓位 (%)</span>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            v-model="config.strategies.buyHedge.capitalIncrementStart"
+                          />
+                        </label>
+                        <label class="field">
+                          <span>递增 (%)</span>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            v-model="config.strategies.buyHedge.capitalIncrementStep"
+                          />
+                        </label>
+                      </template>
+                    </div>
+                    <div class="sub-grid">
+                      <label class="field">
+                        <span>离场模式</span>
+                        <select v-model="config.strategies.buyHedge.exitMode">
+                          <option value="batch">分批离场</option>
+                          <option value="single">带单 / 一次性清仓</option>
+                        </select>
+                      </label>
+                      <template v-if="config.strategies.buyHedge.exitMode === 'batch'">
+                        <label class="field">
+                          <span>每次卖出占持仓 (%)</span>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            v-model="config.strategies.buyHedge.exitBatchPct"
+                          />
+                        </label>
+                        <label class="field">
+                          <span>策略</span>
+                          <select v-model="config.strategies.buyHedge.exitBatchStrategy">
+                            <option value="per_batch">按照持仓批次</option>
+                            <option value="per_step">每上涨一个步长</option>
+                            <option value="ratio">按比例（固定百分比）</option>
+                          </select>
+                        </label>
+                        <label class="field">
+                          <span>步长触发时卖出 (%)</span>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            v-model="config.strategies.buyHedge.exitBatchStepPct"
+                          />
+                        </label>
+                      </template>
+                      <template v-else>
+                        <label class="field">
+                          <span>带单类型</span>
+                          <select v-model="config.strategies.buyHedge.exitSingleType">
+                            <option value="market">一次性市价清仓</option>
+                            <option value="limit">一次性限价清仓</option>
+                          </select>
+                        </label>
+                      </template>
+                    </div>
+                  </div>
+                  <div class="buyhedge-section">
+                    <div class="buyhedge-section__title">限制 & 初始底仓</div>
+                    <div class="sub-grid">
+                      <label class="field">
+                        <span>限买价格</span>
+                        <input
+                          type="number"
+                          min="0"
+                          v-model="config.strategies.buyHedge.limits.limitBuyPrice"
+                        />
+                      </label>
+                      <label class="field">
+                        <span>限平价格</span>
+                        <input
+                          type="number"
+                          min="0"
+                          v-model="config.strategies.buyHedge.limits.limitSellPrice"
+                        />
+                      </label>
+                      <label class="field">
+                        <span>最低价格</span>
+                        <input
+                          type="number"
+                          min="0"
+                          v-model="config.strategies.buyHedge.limits.minPrice"
+                        />
+                      </label>
+                      <label class="checkbox-row">
+                        <input type="checkbox" v-model="config.strategies.buyHedge.limits.stopAddingAtMin" />
+                        <span>达到最低价时停止加仓 / 强制退出</span>
+                      </label>
+                    </div>
+                    <div class="sub-grid">
+                      <label class="field">
+                        <span>初始底仓（手）</span>
+                        <input type="number" min="0" v-model="config.strategies.buyHedge.baseInitialHands" />
+                      </label>
+                      <label class="field">
+                        <span>底仓参考价</span>
+                        <input
+                          type="number"
+                          min="0"
+                          v-model="config.strategies.buyHedge.baseReferencePrice"
+                        />
+                      </label>
+                      <label class="field">
+                        <span>参考价来源</span>
+                        <select v-model="config.strategies.buyHedge.baseReferenceSource">
+                          <option value="first">首次成交价</option>
+                          <option value="last">当前基准价</option>
+                          <option value="custom">自定义</option>
                         </select>
                       </label>
                     </div>

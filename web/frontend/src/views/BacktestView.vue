@@ -351,7 +351,7 @@ const handleAIMouseLeave = () => {
 
     <header class="app-header">
       <div>
-        <h1>StockTool 云端量化 V1.0.6</h1>
+        <h1>StockTool 云端量化 V1.0.7</h1>
         <p>一键上传 CSV · 自动回测 · 智能洞察</p>
       </div>
       <div class="header-actions">
@@ -458,6 +458,7 @@ const handleAIMouseLeave = () => {
             <li>动态资金模块默认启用，首单保持 1 手并在界面直接说明各类金额上限的作用。</li>
             <li>“当前持仓浮动盈亏”与对冲统计改用真实的持仓成本和市值差值。</li>
             <li>百分比类指标（如加仓步长、平均摊低）修正为 100 倍显示，避免误导。</li>
+            <li>买入对冲交易层级统计新增“标签”列，可直接看到每笔是否属于对冲/弱对冲及是否允许重启。</li>
           </ul>
         </div>
         <button type="button" class="tip-close" @click="showTopTip = false" aria-label="关闭提示">✕</button>

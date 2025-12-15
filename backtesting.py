@@ -926,8 +926,10 @@ def backtest_buy_hedge(
     if step_type in {"percent", "percentage"} and step_pct > 1:
         step_pct /= 100.0
     step_pct = max(0.0, float(step_pct))
-    start_position_shares = lot_align(max(0, to_int(config.get("start_position"), 0)))
-    increment_unit_shares = lot_align(max(0, to_int(config.get("increment_unit"), 0)))
+    start_position_hands_raw = max(0, to_int(config.get("start_position"), 0))
+    increment_unit_hands_raw = max(0, to_int(config.get("increment_unit"), 0))
+    start_position_shares = lot_align(start_position_hands_raw * LOT_SIZE)
+    increment_unit_shares = lot_align(increment_unit_hands_raw * LOT_SIZE)
     start_position_hands = shares_to_hands(start_position_shares) or 0
     increment_unit_hands = shares_to_hands(increment_unit_shares) or 0
     mode = str(config.get("mode") or "equal").lower()
@@ -938,6 +940,11 @@ def backtest_buy_hedge(
     max_capital_input = config.get("max_capital_input")
     if (max_capital_value <= 0) and max_capital_ratio > 0:
         max_capital_value = initial_capital * max_capital_ratio
+
+    hedge_cfg = config.get("hedge", {}) or {}
+    hedge_enabled = bool(hedge_cfg.get("enabled"))
+    hedge_mode = str(hedge_cfg.get("mode") or "full").lower()
+    allow_repeat = bool(config.get("allow_repeat"))
 
     cash = float(initial_capital)
     position = 0
@@ -1055,6 +1062,9 @@ def backtest_buy_hedge(
                         "pnl": float(pnl),
                         "return_pct": float(pnl / position_cost) if position_cost else 0.0,
                         "avg_cost_delta_pct": float(cost_reduction),
+                        "hedge_active": hedge_enabled,
+                        "hedge_mode": hedge_mode,
+                        "allow_repeat": allow_repeat,
                     }
                 )
                 max_layers = max(max_layers, add_count)
@@ -1220,6 +1230,9 @@ def backtest_buy_hedge(
                     "pnl": float(pnl),
                     "return_pct": float(pnl / position_cost) if position_cost else 0.0,
                     "avg_cost_delta_pct": float(cost_reduction),
+                    "hedge_active": hedge_enabled,
+                    "hedge_mode": hedge_mode,
+                    "allow_repeat": allow_repeat,
                 }
             )
             max_layers = max(max_layers, add_count)
@@ -1260,6 +1273,21 @@ def backtest_buy_hedge(
         "skipped_by_cash": int(skipped_by_cash),
         "skipped_by_limit": int(skipped_by_limit),
         "skipped_by_rule": int(skipped_by_rule),
+        "hedge": {"enabled": hedge_enabled, "mode": hedge_mode},
+        "allow_repeat": allow_repeat,
+        "step_mode": config.get("step_mode"),
+        "step_abs": config.get("step_abs"),
+        "step_rounding": config.get("step_rounding"),
+        "step_auto": config.get("step_auto"),
+        "growth": config.get("growth"),
+        "position": config.get("position"),
+        "entry": config.get("entry"),
+        "profit": config.get("profit"),
+        "reverse": config.get("reverse"),
+        "capital": config.get("capital"),
+        "exit": config.get("exit"),
+        "limits": config.get("limits"),
+        "base": config.get("base"),
     }
 
     result.buy_hedge_summary = summary
