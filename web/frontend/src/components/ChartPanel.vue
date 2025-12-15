@@ -27,7 +27,10 @@ const readCssVar = (name, fallback) => {
   return value ? value.trim() : fallback;
 };
 
-const resolveBackgroundColor = () => readCssVar('--card-bg', '#1e293b');
+const resolveBackgroundColor = () => {
+  const fallback = readCssVar('--card-bg', '#1e293b');
+  return readCssVar('--chart-panel-canvas', fallback);
+};
 
 const formatTooltipValue = (val) => {
   const num = Number(val);
@@ -74,7 +77,7 @@ const buildOption = () => {
   const sellColor = readCssVar('--danger', '#f87171');
   return {
     backgroundColor: resolveBackgroundColor(),
-  tooltip: {
+    tooltip: {
     trigger: 'axis',
     axisPointer: { type: 'cross' },
     formatter: tooltipFormatter,
@@ -264,11 +267,23 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   min-height: 360px;
+  padding: 18px;
+  border-radius: 26px;
+  background: var(--chart-panel-bg, rgba(var(--surface-rgb), 0.85));
+  border: 1px solid var(--chart-panel-border, rgba(201, 217, 255, 0.85));
+  box-shadow: var(--chart-panel-shadow, 0 20px 50px rgba(0, 0, 0, 0.18));
+  box-sizing: border-box;
+  display: flex;
 }
 
 .chart-panel {
   width: 100%;
+  flex: 1;
   height: 100%;
+  border-radius: 18px;
+  background: var(--chart-panel-canvas, var(--card-bg));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  overflow: hidden;
 }
 
 .no-data-overlay {

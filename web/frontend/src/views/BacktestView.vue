@@ -265,9 +265,18 @@ const handleRun = async (configPayload) => {
   const { payload, meta } = configPayload;
   if (typeof window !== 'undefined') {
     requestAnimationFrame(() => {
-      const target = document.querySelector('.analytics-panel');
-      if (target) {
-        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const categoryRow = document.querySelector('.category-row');
+      if (categoryRow) {
+        const rect = categoryRow.getBoundingClientRect();
+        const offset = rect.top + window.scrollY;
+        window.scrollTo({ top: Math.max(offset - 60, 0), behavior: 'smooth' });
+        return;
+      }
+      const analyticsTarget = document.querySelector('.analytics-panel');
+      if (analyticsTarget) {
+        const rect = analyticsTarget.getBoundingClientRect();
+        const offset = rect.top + window.scrollY;
+        window.scrollTo({ top: Math.max(offset - 60, 0), behavior: 'smooth' });
       } else {
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
@@ -394,7 +403,7 @@ const handleAIMouseLeave = () => {
           <div class="title-bar" aria-hidden="true"></div>
           <h1>
             StockTool 云端量化
-            <span class="header-chip">V1.0.7</span>
+            <span class="header-chip">V1.08</span>
           </h1>
         </div>
         <p class="header-subtitle">
@@ -508,12 +517,13 @@ const handleAIMouseLeave = () => {
       <div v-if="showTopTip" class="app-tip-wrapper">
         <section class="app-tip-card">
         <div class="app-tip-content">
-          <strong>版本更新提醒</strong>
+          <strong>版本更新提醒（V1.08）</strong>
           <ul class="tip-list">
             <li>动态资金模块默认启用，首单保持 1 手并在界面直接说明各类金额上限的作用。</li>
             <li>“当前持仓浮动盈亏”与对冲统计改用真实的持仓成本和市值差值。</li>
             <li>百分比类指标（如加仓步长、平均摊低）修正为 100 倍显示，避免误导。</li>
             <li>买入对冲交易层级统计新增“标签”列，可直接看到每笔是否属于对冲/弱对冲及是否允许重启。</li>
+            <li>新增“升级界面”说明，介绍新网页布局、配色和功能模块，便于快速适应新版体验。</li>
           </ul>
         </div>
         <button type="button" class="tip-close" @click="showTopTip = false" aria-label="关闭提示">✕</button>
