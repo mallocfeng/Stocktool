@@ -783,16 +783,8 @@ label {
   margin: 0;
   font-size: clamp(2rem, 3.2vw, 2.9rem);
   font-weight: 800;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
   line-height: 1.2;
   color: var(--text-primary);
-  background: var(--hero-title-gradient, linear-gradient(95deg, #0c1d45 0%, #123575 35%, #1c5fff 80%, #4b8fff 100%));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  filter: drop-shadow(0 16px 30px rgba(23, 60, 146, 0.25));
   letter-spacing: -0.02em;
 }
 
@@ -804,6 +796,10 @@ label {
   color: #fff;
   background: linear-gradient(120deg, var(--accent) 0%, var(--accent-secondary) 100%);
   box-shadow: 0 10px 25px rgba(var(--tone-1-rgb), 0.35);
+  margin-left: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
 }
 
 .header-subtitle {
