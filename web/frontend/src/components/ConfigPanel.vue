@@ -47,7 +47,7 @@ const config = reactive({
     dca: { enabled: false, size: 5, target: 20 },
     grid: { enabled: false, pct: 5, cash: 1000, limit: '', accumulate: true },
     dynamic: {
-      enabled: true,
+      enabled: false,
       lossStepAmount: 10,
       maxAddSteps: 5,
       maxInvestmentLimit: 50000,
