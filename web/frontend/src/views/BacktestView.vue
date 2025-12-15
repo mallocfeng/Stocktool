@@ -523,7 +523,7 @@ const handleAIMouseLeave = () => {
             <li>“当前持仓浮动盈亏”与对冲统计改用真实的持仓成本和市值差值。</li>
             <li>百分比类指标（如加仓步长、平均摊低）修正为 100 倍显示，避免误导。</li>
             <li>买入对冲交易层级统计新增“标签”列，可直接看到每笔是否属于对冲/弱对冲及是否允许重启。</li>
-            <li>新增“升级界面”说明，介绍新网页布局、配色和功能模块，便于快速适应新版体验。</li>
+            <li>网页升级全新界面，提供全新视觉体验</li>
           </ul>
         </div>
         <button type="button" class="tip-close" @click="showTopTip = false" aria-label="关闭提示">✕</button>
