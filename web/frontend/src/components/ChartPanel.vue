@@ -15,7 +15,13 @@ const props = defineProps({
 const chartContainer = ref(null);
 let chartInstance = null;
 let resizeObserver = null;
+let intersectionObserver = null;
+let resizeRaf = null;
+let resizeDebounceTimer = null;
 let klineRawCache = [];
+const isChartVisible = ref(true);
+let pendingResize = false;
+let latestChartPayload = null;
 
 const hasKlineData = computed(() => Array.isArray(props.marketData?.kline) && props.marketData.kline.length > 0);
 const themeClass = computed(() => `theme-${props.theme || 'dark'}`);
@@ -169,17 +175,51 @@ const buildOption = () => {
   };
 };
 
-const initChart = () => {
-  if (!chartContainer.value) return;
+const scheduleResize = () => {
+  if (!chartInstance) return;
+  if (!isChartVisible.value) {
+    pendingResize = true;
+    return;
+  }
+  if (resizeRaf) return;
+  resizeRaf = requestAnimationFrame(() => {
+    resizeRaf = null;
+    chartInstance?.resize();
+  });
+};
+
+const applyLatestChartPayload = () => {
+  if (!chartInstance || !latestChartPayload) return;
+  chartInstance.setOption(latestChartPayload);
+  scheduleResize();
+};
+
+const destroyChart = () => {
   chartInstance?.dispose();
+  chartInstance = null;
+  if (resizeRaf) {
+    cancelAnimationFrame(resizeRaf);
+    resizeRaf = null;
+  }
+};
+
+const initChart = () => {
+  if (!chartContainer.value || !isChartVisible.value) {
+    return;
+  }
+  destroyChart();
   const themeName = resolveEchartTheme(props.theme);
   chartInstance = echarts.init(chartContainer.value, themeName);
   chartInstance.setOption(buildOption());
-  updateChart();
+  applyLatestChartPayload();
+  if (pendingResize) {
+    pendingResize = false;
+    scheduleResize();
+  }
 };
 
 const updateChart = () => {
-  if (!chartInstance || !props.marketData || !props.marketData.kline) return;
+  if (!props.marketData || !props.marketData.kline) return;
   const { kline, buy_signals = [], sell_signals = [] } = props.marketData;
   klineRawCache = kline.map((item) => ({
     date: item.date,
@@ -207,7 +247,7 @@ const updateChart = () => {
       sellPoints.push([d, row.high * 1.02]);
     }
   });
-  chartInstance.setOption({
+  latestChartPayload = {
     xAxis: [{ data: dates }, { data: dates }],
     series: [
       { data: klineData },
@@ -218,8 +258,8 @@ const updateChart = () => {
       { data: buyPoints },
       { data: sellPoints },
     ],
-  });
-  chartInstance.resize();
+  };
+  applyLatestChartPayload();
 };
 
 watch(
@@ -233,22 +273,57 @@ watch(
 watch(
   () => props.theme,
   () => {
+    if (!isChartVisible.value) {
+      destroyChart();
+      return;
+    }
     nextTick(() => initChart());
   }
 );
 
 onMounted(() => {
   initChart();
-  resizeObserver = new ResizeObserver(() => chartInstance?.resize());
+  const handleObservedResize = () => {
+    if (!chartInstance) return;
+    clearTimeout(resizeDebounceTimer);
+    resizeDebounceTimer = setTimeout(() => {
+      resizeDebounceTimer = null;
+      scheduleResize();
+    }, 120);
+  };
+  resizeObserver = new ResizeObserver(handleObservedResize);
   if (chartContainer.value) {
     resizeObserver.observe(chartContainer.value);
+  }
+  if (typeof IntersectionObserver !== 'undefined' && chartContainer.value) {
+    intersectionObserver = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        const visible = !!entry?.isIntersecting;
+        if (visible === isChartVisible.value) return;
+        isChartVisible.value = visible;
+        if (visible) {
+          initChart();
+        } else {
+          pendingResize = false;
+          destroyChart();
+        }
+      },
+      { threshold: 0.1 },
+    );
+    intersectionObserver.observe(chartContainer.value);
   }
   setTimeout(() => updateChart(), 400);
 });
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect();
-  chartInstance?.dispose();
+  intersectionObserver?.disconnect();
+  if (resizeDebounceTimer) {
+    clearTimeout(resizeDebounceTimer);
+    resizeDebounceTimer = null;
+  }
+  destroyChart();
 });
 </script>
 

@@ -845,30 +845,28 @@ const runBacktest = () => {
       <div class="strategy-launch-header">
         <div class="strategy-launch-info">
           <div class="section-title">策略模块</div>
-          <div class="strategy-summary">
-            <span class="summary-label">已启用</span>
-            <div class="summary-content">
-              <template v-if="enabledStrategies.length">
-                <span
-                  v-for="mod in enabledStrategies"
-                  :key="mod"
-                  class="summary-pill"
-                >
-                  {{ mod }}
-                </span>
-              </template>
-              <span v-else>未启用任何模块</span>
-            </div>
+          <span class="summary-label">已启用</span>
+          <div class="summary-content">
+            <template v-if="enabledStrategies.length">
+              <span
+                v-for="mod in enabledStrategies"
+                :key="mod"
+                class="summary-pill"
+              >
+                {{ mod }}
+              </span>
+            </template>
+            <span v-else>未启用任何模块</span>
           </div>
-          <ul class="strategy-hints">
-            <li>点击展开抽屉即可管理所有模块</li>
-            <li>关闭抽屉可腾出更多空间查看结果</li>
-          </ul>
         </div>
         <button type="button" class="secondary strategy-toggle" @click="toggleStrategyDrawer" :disabled="!dataReady">
           {{ strategyDrawerOpen ? '收起模块' : '展开设置' }}
         </button>
       </div>
+      <ul class="strategy-hints">
+        <li>点击展开抽屉即可管理所有模块</li>
+        <li>关闭抽屉可腾出更多空间查看结果</li>
+      </ul>
     </section>
 
     <transition name="drawer-slide">
