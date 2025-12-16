@@ -49,6 +49,11 @@ const showUserInfo = computed(() => !disableAuth && Boolean(currentUser.value));
 const showAdminLink = computed(() => !disableAuth && currentUser.value?.role === 'admin');
 const isAdminUser = computed(() => currentUser.value?.role === 'admin');
 const usernameDisplay = computed(() => currentUser.value?.username || '未命名');
+const isMobile = ref(false);
+const showMobileConfig = ref(false);
+const desktopConfigHost = ref(null);
+const mobileConfigHost = ref(null);
+const MOBILE_BREAKPOINT = 900;
 const goAdmin = () => {
   router.push({ path: '/admin' });
 };
@@ -63,6 +68,26 @@ const themeIndicatorStyle = computed(() => ({
   '--theme-indicator-left': `${themeIndicator.value.left}px`,
   '--theme-indicator-width': `${themeIndicator.value.width}px`,
 }));
+const configPanelTarget = computed(() => {
+  if (isMobile.value) return mobileConfigHost.value;
+  return desktopConfigHost.value;
+});
+const updateMobileLayout = () => {
+  if (typeof window === 'undefined') return;
+  const nextState = window.innerWidth <= MOBILE_BREAKPOINT;
+  if (nextState === isMobile.value) return;
+  isMobile.value = nextState;
+  if (!nextState) {
+    showMobileConfig.value = false;
+  }
+};
+const toggleMobileConfig = () => {
+  if (!isMobile.value) return;
+  showMobileConfig.value = !showMobileConfig.value;
+};
+const closeMobileConfig = () => {
+  showMobileConfig.value = false;
+};
 
 const overlayActive = computed(() => isRunning.value || overlayBlocking.value);
 const overlayTitle = computed(() => {
@@ -170,11 +195,18 @@ watch(themeMode, () => {
 onMounted(() => {
   loadPersistedAIInsight();
   updateThemeIndicator();
-  window.addEventListener('resize', updateThemeIndicator);
+  updateMobileLayout();
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', updateThemeIndicator);
+    window.addEventListener('resize', updateMobileLayout);
+  }
 });
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', updateThemeIndicator);
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', updateThemeIndicator);
+    window.removeEventListener('resize', updateMobileLayout);
+  }
   clearTimeout(themeIndicatorTimer);
 });
 
@@ -263,6 +295,9 @@ const handleAIToggle = () => {
 const handleRun = async (configPayload) => {
   if (!configPayload || !configPayload.payload) return;
   const { payload, meta } = configPayload;
+  if (isMobile.value) {
+    closeMobileConfig();
+  }
   if (typeof window !== 'undefined') {
     requestAnimationFrame(() => {
       const categoryRow = document.querySelector('.category-row');
@@ -523,7 +558,7 @@ const handleAIMouseLeave = () => {
             <li>“当前持仓浮动盈亏”与对冲统计改用真实的持仓成本和市值差值。</li>
             <li>百分比类指标（如加仓步长、平均摊低）修正为 100 倍显示，避免误导。</li>
             <li>买入对冲交易层级统计新增“标签”列，可直接看到每笔是否属于对冲/弱对冲及是否允许重启。</li>
-            <li>网页升级全新界面，提供全新视觉体验</li>
+            <li>网页升级全新界面，提供全新视觉体验，支持移动端直接浏览和配置</li>
           </ul>
         </div>
         <button type="button" class="tip-close" @click="showTopTip = false" aria-label="关闭提示">✕</button>
@@ -531,15 +566,15 @@ const handleAIMouseLeave = () => {
     </div>
     </transition>
 
-    <main class="app-main">
+    <main class="app-main" :class="{ 'app-main--mobile': isMobile }">
       <aside class="sidebar">
-        <ConfigPanel
-          :busy="isRunning"
-          @run="handleRun"
-          @block="handleOverlayBlock"
-          @unblock="handleOverlayUnblock"
-        />
-        <section class="card log-panel">
+        <div
+          id="config-panel-desktop"
+          class="config-panel-host"
+          :aria-hidden="isMobile.toString()"
+          ref="desktopConfigHost"
+        ></div>
+        <section class="card log-panel" v-show="!isMobile">
           <div class="panel-header">
             <h3>运行日志</h3>
           </div>
@@ -553,6 +588,44 @@ const handleAIMouseLeave = () => {
       </aside>
 
       <section class="content-column">
+        <div v-show="isMobile" class="card mobile-config-menu">
+          <div class="mobile-config-text">
+            <h3>策略配置</h3>
+            <p>点击按钮展开配置卡片，完成上传与策略调整。</p>
+          </div>
+          <button
+            type="button"
+            class="primary"
+            @click="toggleMobileConfig"
+            :aria-expanded="showMobileConfig.toString()"
+          >
+            {{ showMobileConfig ? '收起配置' : '展开配置' }}
+          </button>
+        </div>
+        <div
+          v-show="isMobile"
+          class="mobile-config-card"
+          :class="{ 'mobile-config-card--collapsed': !showMobileConfig }"
+          :aria-hidden="(!showMobileConfig).toString()"
+        >
+          <div
+            id="config-panel-mobile"
+            class="config-panel-host"
+            :aria-hidden="(!showMobileConfig).toString()"
+            ref="mobileConfigHost"
+          ></div>
+        </div>
+        <section v-if="isMobile" class="card log-panel mobile-log-panel">
+          <div class="panel-header">
+            <h3>运行日志</h3>
+          </div>
+          <div class="log-view">
+            <template v-if="logs.length">
+              <div v-for="(log, idx) in logs" :key="idx">{{ log }}</div>
+            </template>
+            <div v-else class="empty">暂无日志</div>
+          </div>
+        </section>
         <div class="card chart-card">
           <div class="panel-header">
             <div>
@@ -635,5 +708,14 @@ const handleAIMouseLeave = () => {
         />
       </section>
     </main>
+    <Teleport v-if="configPanelTarget" :to="configPanelTarget">
+      <ConfigPanel
+        :busy="isRunning"
+        :isMobile="isMobile"
+        @run="handleRun"
+        @block="handleOverlayBlock"
+        @unblock="handleOverlayUnblock"
+      />
+    </Teleport>
   </div>
 </template>

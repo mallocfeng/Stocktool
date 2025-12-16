@@ -11,6 +11,7 @@ flatpickr.localize(flatpickrZh);
 
 const props = defineProps({
   busy: { type: Boolean, default: false },
+  isMobile: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['run', 'block', 'unblock']);
@@ -164,6 +165,7 @@ const rangePresetOptions = [
 ];
 let presetApplying = false;
 const strategyDrawerOpen = ref(false);
+const strategyPanelRef = ref(null);
 const dataReady = computed(() => Boolean(config.csv_path));
 const strategyManifest = [
   { key: 'dynamic', label: '动态资金管理' },
@@ -348,10 +350,9 @@ const handleFetchFromSina = async () => {
 
 const scrollToDrawer = () => {
   nextTick(() => {
-    const panelEl = document.querySelector('.strategy-drawer-panel');
-    if (panelEl) {
-      panelEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+    if (!strategyPanelRef.value) return;
+    const block = props.isMobile ? 'start' : 'center';
+    strategyPanelRef.value.scrollIntoView({ behavior: 'smooth', block });
   });
 };
 
@@ -870,10 +871,18 @@ const runBacktest = () => {
     </section>
 
     <transition name="drawer-slide">
-      <div v-if="strategyDrawerOpen" class="strategy-drawer-layer">
-        <div class="drawer-backdrop" @click="closeStrategyDrawer"></div>
-        <div class="strategy-drawer-panel" role="dialog" aria-modal="true">
-          <div class="drawer-header">
+      <div
+        v-if="strategyDrawerOpen"
+        :class="props.isMobile ? 'strategy-inline-wrapper' : 'strategy-drawer-layer'"
+      >
+        <div v-if="!props.isMobile" class="drawer-backdrop" @click="closeStrategyDrawer"></div>
+        <div
+          :class="['strategy-panel', props.isMobile ? 'strategy-inline-panel' : 'strategy-drawer-panel']"
+          :role="props.isMobile ? 'region' : 'dialog'"
+          :aria-modal="props.isMobile ? null : 'true'"
+          ref="strategyPanelRef"
+        >
+          <div :class="['drawer-header', { 'inline-drawer-header': props.isMobile }]">
             <div>
               <h3>策略模块配置</h3>
               <p>勾选并调整想要启用的模块</p>
