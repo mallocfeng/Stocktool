@@ -79,8 +79,8 @@ const buildOption = () => {
   const dynamicLine = readCssVar('--accent-secondary', '#a855f7');
   const investMainColor = readCssVar('--warning', '#facc15');
   const investHedgeColor = readCssVar('--success', '#34d399');
-  const buyColor = readCssVar('--success', '#22c55e');
-  const sellColor = readCssVar('--danger', '#f87171');
+  const buyColor = readCssVar('--warning', '#facc15');
+  const sellColor = readCssVar('--accent', '#3b82f6');
   return {
     backgroundColor: resolveBackgroundColor(),
     tooltip: {

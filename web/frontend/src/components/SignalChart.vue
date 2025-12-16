@@ -23,8 +23,8 @@ const resolveCssVar = (name, fallback) => {
 const cardBackground = () => resolveCssVar('--card-bg', '#1e293b');
 const textPrimary = () => resolveCssVar('--text-primary', '#e2e8f0');
 const accentColor = () => resolveCssVar('--accent', '#3b82f6');
-const buyColor = () => resolveCssVar('--success', '#34d399');
-const sellColor = () => resolveCssVar('--danger', '#f87171');
+const buyColor = () => resolveCssVar('--warning', '#facc15');
+const sellColor = () => resolveCssVar('--accent', '#3b82f6');
 
 const renderChart = () => {
   if (!container.value || !props.dataset) return;
