@@ -261,7 +261,7 @@ body::after {
   filter: blur(10px);
   opacity: 0.6;
   pointer-events: none;
-  transition: opacity 0.3s ease;
+  transition: opacity 0.85s ease, transform 0.85s ease;
 }
 
 body::before {
@@ -273,6 +273,73 @@ body::after {
   bottom: -180px;
   right: -120px;
   background: radial-gradient(circle, rgba(var(--tone-2-rgb, 14, 165, 233), 0.25), transparent 65%);
+}
+
+:root.theme-changing,
+:root.theme-changing body,
+:root.theme-changing .app-shell,
+:root.theme-changing .card,
+:root.theme-changing .theme-toggle,
+:root.theme-changing .theme-chip,
+:root.theme-changing button,
+:root.theme-changing input:not([type='checkbox']):not([type='radio']),
+:root.theme-changing textarea,
+:root.theme-changing select,
+:root.theme-changing .panel-header,
+:root.theme-changing .log-panel,
+:root.theme-changing .ai-card,
+:root.theme-changing .chart-card,
+:root.theme-changing .analytics-panel,
+:root.theme-changing .config-panel-host,
+:root.theme-changing .mobile-config-card,
+:root.theme-changing .sidebar {
+  transition:
+    background 0.95s cubic-bezier(0.19, 1, 0.22, 1),
+    background-color 0.95s cubic-bezier(0.19, 1, 0.22, 1),
+    color 0.85s cubic-bezier(0.19, 1, 0.22, 1),
+    border-color 0.9s cubic-bezier(0.19, 1, 0.22, 1),
+    box-shadow 0.9s ease;
+}
+
+:root.theme-changing body {
+  filter: saturate(1.02);
+}
+
+:root.theme-soft-transition body,
+:root.theme-soft-transition .app-shell,
+:root.theme-soft-transition .card,
+:root.theme-soft-transition .theme-toggle,
+:root.theme-soft-transition .theme-chip,
+:root.theme-soft-transition button,
+:root.theme-soft-transition input:not([type='checkbox']):not([type='radio']),
+:root.theme-soft-transition textarea,
+:root.theme-soft-transition select,
+:root.theme-soft-transition .panel-header,
+:root.theme-soft-transition .log-panel,
+:root.theme-soft-transition .ai-card,
+:root.theme-soft-transition .chart-card,
+:root.theme-soft-transition .analytics-panel,
+:root.theme-soft-transition .config-panel-host,
+:root.theme-soft-transition .mobile-config-card,
+:root.theme-soft-transition .sidebar {
+  transition:
+    background 1.95s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 1.95s cubic-bezier(0.16, 1, 0.3, 1),
+    color 1.6s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 1.8s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 1.65s ease;
+}
+
+:root.theme-soft-transition body {
+  filter: saturate(1.05) brightness(1.02);
+}
+
+:root.theme-soft-transition body::before,
+:root.theme-soft-transition body::after {
+  opacity: 0.35;
+  transform: scale(1.05);
+  transition-duration: 2.1s, 2.1s;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 button {

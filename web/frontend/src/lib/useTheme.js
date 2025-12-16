@@ -17,9 +17,31 @@ const resolvedTheme = computed(() => {
   return themeMode.value;
 });
 
-const applyTheme = (theme) => {
+const THEME_TRANSITION_CLASS = 'theme-changing';
+const THEME_SOFT_CLASS = 'theme-soft-transition';
+const THEME_TRANSITION_DURATION = 1200;
+const THEME_SOFT_DURATION = 2000;
+let themeTransitionTimer = null;
+
+const applyTheme = (theme, options = {}) => {
   if (typeof document === 'undefined') return;
-  document.documentElement.dataset.theme = theme;
+  const { soft = false } = options;
+  const root = document.documentElement;
+  root.dataset.theme = theme;
+  root.classList.add(THEME_TRANSITION_CLASS);
+  if (soft) {
+    root.classList.add(THEME_SOFT_CLASS);
+  } else {
+    root.classList.remove(THEME_SOFT_CLASS);
+  }
+  clearTimeout(themeTransitionTimer);
+  const timeout = soft ? THEME_SOFT_DURATION : THEME_TRANSITION_DURATION;
+  themeTransitionTimer = window.setTimeout(() => {
+    root.classList.remove(THEME_TRANSITION_CLASS);
+    if (soft) {
+      root.classList.remove(THEME_SOFT_CLASS);
+    }
+  }, timeout);
 };
 
 const persistThemeMode = (mode) => {
@@ -69,8 +91,10 @@ if (typeof window !== 'undefined') {
 
 watch(
   resolvedTheme,
-  (theme) => {
-    applyTheme(theme);
+  (theme, previousTheme) => {
+    const softTransition =
+      previousTheme === 'dark' && (theme === 'light' || theme === 'morandi');
+    applyTheme(theme, { soft: softTransition });
   },
   { immediate: true },
 );
