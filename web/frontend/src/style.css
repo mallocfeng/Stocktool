@@ -1522,7 +1522,8 @@ label {
   display: flex;
   gap: 18px;
   align-items: center;
-  min-width: 320px;
+  width: min(85vw, 420px);
+  min-width: 260px;
   box-shadow: 0 20px 50px rgba(var(--overlay-rgb), 0.6);
 }
 
@@ -1549,6 +1550,30 @@ label {
   margin: 0;
   font-size: 0.9rem;
   color: var(--text-secondary);
+}
+
+@media (max-width: 640px) {
+  .overlay-card {
+    width: min(90vw, 300px);
+    min-width: auto;
+    padding: 18px 20px;
+    flex-direction: column;
+    text-align: center;
+    gap: 12px;
+  }
+
+  .overlay-spinner {
+    width: 32px;
+    height: 32px;
+  }
+
+  .overlay-text strong {
+    font-size: 0.95rem;
+  }
+
+  .overlay-text p {
+    font-size: 0.82rem;
+  }
 }
 
 .fade-enter-active,
@@ -2150,7 +2175,12 @@ label {
 }
 
 .dynamic-trades {
-  margin-top: 24px;
+  margin-top: 6px;
+}
+
+.dynamic-trades h4 {
+  margin: 0 0 6px;
+  font-size: 1rem;
 }
 
 .trade-summary-row {

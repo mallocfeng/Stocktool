@@ -704,6 +704,7 @@ const handleAIMouseLeave = () => {
           :initialCapital="lastConfigMeta.initialCapital"
           :multiFreqs="lastConfigMeta.multiFreqs"
           :theme="resolvedTheme"
+          :is-mobile="isMobile"
           @select-strategy="handleSelectStrategy"
         />
       </section>

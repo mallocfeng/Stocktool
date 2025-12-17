@@ -11,6 +11,7 @@ const props = defineProps({
   initialCapital: { type: Number, default: 100000 },
   multiFreqs: { type: String, default: 'D,W,M' },
   theme: { type: String, default: 'dark' },
+  isMobile: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['selectStrategy']);
@@ -90,6 +91,7 @@ const visibleCategories = computed(() =>
 
 const activeTab = ref('results');
 const loading = ref(false);
+const tabContentRef = ref(null);
 const selectedResult = ref('');
 const scores = ref([]);
 const positionPlan = ref([]);
@@ -1013,6 +1015,18 @@ const handleResize = () => {
   buyHedgeImpactChartInstance?.resize();
 };
 
+const scrollToTabContentIfMobile = () => {
+  if (!props.isMobile) return;
+  if (typeof window === 'undefined') return;
+  nextTick(() => {
+    const anchor = tabContentRef.value;
+    if (!anchor) return;
+    const targetY = anchor.getBoundingClientRect().top + window.scrollY;
+    const offset = Math.max(targetY - 80, 0);
+    window.scrollTo({ top: offset, left: 0, behavior: 'smooth' });
+  });
+};
+
 onMounted(() => {
   window.addEventListener('resize', handleResize);
 });
@@ -1024,6 +1038,7 @@ onBeforeUnmount(() => {
 
 const switchTab = (tab) => {
   activeTab.value = tab;
+  scrollToTabContentIfMobile();
   if (tab === 'buyhedge') {
     selectBuyHedgeEntryIfAvailable();
     nextTick(() => {
@@ -1454,7 +1469,7 @@ const isCategoryDisabled = (key) => {
 
 <template>
   <div class="analytics-panel card">
-      <div class="category-row">
+    <div class="category-row">
         <button
           v-for="item in visibleCategories"
           :key="item.key"
@@ -1469,7 +1484,7 @@ const isCategoryDisabled = (key) => {
       </button>
     </div>
 
-    <div class="tab-content">
+    <div class="tab-content" ref="tabContentRef">
       <div v-if="loading" class="loading">数据加载中…</div>
 
       <section v-if="activeTab === 'results'" class="results-view">

@@ -322,12 +322,31 @@ const handleFileUpload = async (event) => {
   }
 };
 
+const resetViewportZoom = () => {
+  if (typeof document === 'undefined') return;
+  const active = document.activeElement;
+  if (active && typeof active.blur === 'function') {
+    active.blur();
+  }
+  const viewport = document.querySelector('meta[name="viewport"]');
+  if (!viewport) return;
+  const original = viewport.dataset.originalContent || viewport.getAttribute('content') || '';
+  if (!viewport.dataset.originalContent) {
+    viewport.dataset.originalContent = original;
+  }
+  viewport.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
+  setTimeout(() => {
+    viewport.setAttribute('content', viewport.dataset.originalContent || 'width=device-width, initial-scale=1');
+  }, 300);
+};
+
 const handleFetchFromSina = async () => {
   const code = stockCode.value.trim();
   if (!code) {
     alert('请输入股票代码，例如 600519 或 sh600519');
     return;
   }
+  resetViewportZoom();
   const ticket = ++importTicket;
   fetching.value = true;
   emit('block', {
