@@ -27,6 +27,7 @@ const logs = ref([]);
 const hasData = ref(false);
 const isRunning = ref(false);
 const lastConfigMeta = ref({ initialCapital: 100000, multiFreqs: 'D,W,M', assetLabel: '' });
+const lastEnabledStrategies = ref([]);
 const aiResult = ref(null);
 const aiLoading = ref(false);
 const aiError = ref('');
@@ -330,6 +331,9 @@ const handleRun = async (configPayload) => {
   try {
     const res = await axios.post('/run_backtest', payload);
     if (res.data.status === 'success') {
+      lastEnabledStrategies.value = Object.entries(payload.strategies || {})
+        .filter(([, strategy]) => Boolean(strategy?.enabled))
+        .map(([key]) => key);
       backtestResults.value = res.data.entries;
       logs.value = res.data.logs || [];
       if (res.data.entries.length) {
@@ -438,7 +442,7 @@ const handleAIMouseLeave = () => {
           <div class="title-bar" aria-hidden="true"></div>
           <h1>
             StockTool 云端量化
-            <span class="header-chip">V1.08</span>
+            <span class="header-chip">V1.0.9</span>
           </h1>
         </div>
         <p class="header-subtitle">
@@ -551,19 +555,18 @@ const handleAIMouseLeave = () => {
     <transition name="fade">
       <div v-if="showTopTip" class="app-tip-wrapper">
         <section class="app-tip-card">
-        <div class="app-tip-content">
-          <strong>版本更新提醒（V1.08）</strong>
-          <ul class="tip-list">
-            <li>动态资金模块默认启用，首单保持 1 手并在界面直接说明各类金额上限的作用。</li>
-            <li>“当前持仓浮动盈亏”与对冲统计改用真实的持仓成本和市值差值。</li>
-            <li>百分比类指标（如加仓步长、平均摊低）修正为 100 倍显示，避免误导。</li>
-            <li>买入对冲交易层级统计新增“标签”列，可直接看到每笔是否属于对冲/弱对冲及是否允许重启。</li>
-            <li>网页升级全新界面，提供全新视觉体验，支持移动端直接浏览和配置</li>
-          </ul>
-        </div>
-        <button type="button" class="tip-close" @click="showTopTip = false" aria-label="关闭提示">✕</button>
-      </section>
-    </div>
+          <div class="app-tip-content">
+            <strong>版本更新提醒（V1.0.9）</strong>
+            <ul class="tip-list">
+              <li>“回测结果”卡片右上角的“XX 笔交易”现在是可点的按钮，点它可展开逐笔交易明细。</li>
+              <li>明细表里新增“投资金额”列（包含固定周期 / 止盈止损 / 定投 / 网格 / 动态资金），直接显示每笔的成本投入。</li>
+              <li>提示行与卡片标题都额外加了说明区域，提醒大家如何查看新功能，行为更直观。</li>
+              <li>移动端回测页同步优化，加载提示、卡片样式、模块卡片说明都已和桌面保持一致。</li>
+            </ul>
+          </div>
+          <button type="button" class="tip-close" @click="showTopTip = false" aria-label="关闭提示">✕</button>
+        </section>
+      </div>
     </transition>
 
     <main class="app-main" :class="{ 'app-main--mobile': isMobile }">
@@ -704,6 +707,7 @@ const handleAIMouseLeave = () => {
           :initialCapital="lastConfigMeta.initialCapital"
           :multiFreqs="lastConfigMeta.multiFreqs"
           :theme="resolvedTheme"
+          :enabled-strategies="lastEnabledStrategies"
           :is-mobile="isMobile"
           @select-strategy="handleSelectStrategy"
         />

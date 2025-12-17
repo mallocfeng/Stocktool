@@ -166,6 +166,7 @@ def backtest_fixed_period(
     position = 0
     entry_price = 0.0
     entry_idx: Optional[int] = None
+    entry_investment_amount = 0.0
     trades: List[Trade] = []
     equity = pd.Series(index=idx, dtype=float)
     t1_guard = TPlusOneGuard()
@@ -187,6 +188,7 @@ def backtest_fixed_period(
                 t1_guard.add(date, position)
                 pending_exit = False
                 pending_exit_reason = ""
+                entry_investment_amount = cost
         else:
             should_exit = pending_exit
             reason = pending_exit_reason
@@ -218,6 +220,7 @@ def backtest_fixed_period(
                             exit_price=price,
                             return_pct=float(ret),
                             holding_days=int(days_hold),
+                            investment_amount=entry_investment_amount if entry_investment_amount else None,
                             note=reason or f"固定{hold_days}天",
                         )
                     )
@@ -226,6 +229,7 @@ def backtest_fixed_period(
                     entry_idx = None
                     pending_exit = False
                     pending_exit_reason = ""
+                    entry_investment_amount = 0.0
 
         equity.iloc[i] = cash + position * price
 
@@ -247,6 +251,7 @@ def backtest_fixed_period(
                     exit_price=price,
                     return_pct=float(ret),
                     holding_days=int(days_hold),
+                    investment_amount=entry_investment_amount if entry_investment_amount else None,
                     note=f"到样本末尾强平(固定{hold_days}天)",
                 )
             )
@@ -277,6 +282,7 @@ def backtest_take_profit_stop_loss(
     position = 0
     entry_price = 0.0
     entry_idx: Optional[int] = None
+    entry_investment_amount = 0.0
     trades: List[Trade] = []
     equity = pd.Series(index=idx, dtype=float)
     t1_guard = TPlusOneGuard()
@@ -298,6 +304,7 @@ def backtest_take_profit_stop_loss(
                 t1_guard.add(date, position)
                 pending_exit = False
                 pending_exit_reason = ""
+                entry_investment_amount = cost
         else:
             assert entry_idx is not None
             ret = (price - entry_price) / entry_price
@@ -333,6 +340,7 @@ def backtest_take_profit_stop_loss(
                             return_pct=float(ret),
                             holding_days=int(days_hold),
                             note=reason or "卖出信号",
+                            investment_amount=entry_investment_amount if entry_investment_amount else None,
                         )
                     )
                     position = 0
@@ -362,6 +370,7 @@ def backtest_take_profit_stop_loss(
                     return_pct=float(ret),
                     holding_days=int(days_hold),
                     note="样本末尾强平(止盈止损)",
+                    investment_amount=entry_investment_amount if entry_investment_amount else None,
                 )
             )
             equity.iloc[-1] = cash
@@ -1045,6 +1054,7 @@ def backtest_buy_hedge(
                         return_pct=float((exit_price - entry_price0) / entry_price0) if entry_price0 else 0.0,
                         holding_days=int(days_hold),
                         note="买入对冲",
+                        investment_amount=float(position_cost) if position_cost else None,
                     )
                 )
                 cost_reduction = ((entry_price0 - avg_cost) / entry_price0) if entry_price0 else 0.0
@@ -1212,6 +1222,7 @@ def backtest_buy_hedge(
                     return_pct=float((price - entry_price0) / entry_price0) if entry_price0 else 0.0,
                     holding_days=int(days_hold),
                     note="买入对冲-样本结束强平",
+                    investment_amount=float(position_cost) if position_cost else None,
                 )
             )
             pnl = value - exit_fee - position_cost
@@ -1321,6 +1332,7 @@ def backtest_dca_simple(
 
     first_buy_date: Optional[pd.Timestamp] = None
     first_buy_price: float = 0.0
+    entry_investment_amount = 0.0
 
     for i, date in enumerate(idx):
         price = float(close.iloc[i])
@@ -1337,6 +1349,7 @@ def backtest_dca_simple(
                 if first_buy_date is None:
                     first_buy_date = date
                     first_buy_price = price
+                entry_investment_amount += cost
 
         equity.iloc[i] = cash + position * price
 
@@ -1366,6 +1379,7 @@ def backtest_dca_simple(
                         return_pct=float(ret),
                         holding_days=int(days_hold),
                         note=exit_note,
+                        investment_amount=entry_investment_amount if entry_investment_amount else None,
                     )
                 )
                 position = 0
@@ -1374,6 +1388,7 @@ def backtest_dca_simple(
                 pending_exit = False
                 pending_exit_reason = ""
                 equity.iloc[i] = cash
+                entry_investment_amount = 0.0
 
     if position > 0:
         price = float(close.iloc[-1])
@@ -1397,6 +1412,7 @@ def backtest_dca_simple(
                     return_pct=float(ret),
                     holding_days=int(days_hold),
                     note="样本末尾全部卖出(定投)",
+                    investment_amount=entry_investment_amount if entry_investment_amount else None,
                 )
             )
             position = 0
@@ -1404,6 +1420,7 @@ def backtest_dca_simple(
             first_buy_price = 0.0
             pending_exit = False
             pending_exit_reason = ""
+            entry_investment_amount = 0.0
         else:
             pending_exit = True
             pending_exit_reason = pending_exit_reason or "样本结束未满足T+1"
@@ -1448,6 +1465,7 @@ def backtest_grid_simple(
         up_threshold = last_trade_price * (1 + grid_pct)
 
         trade_note = ""
+        trade_investment_amount = None
 
         if price <= down_threshold and (max_grids is None or grids_opened < max_grids):
             invest_cash = single_grid_cash if not accumulative else min(cash, equity.iloc[i] * grid_pct)
@@ -1462,6 +1480,7 @@ def backtest_grid_simple(
                     last_trade_price = price
                     grids_opened += 1
                     trade_note = "网格买入"
+                    trade_investment_amount = float(cost)
                     t1_guard.add(date, shares)
 
         elif price >= up_threshold and position > 0:
@@ -1477,6 +1496,7 @@ def backtest_grid_simple(
                 position -= sellable
                 last_trade_price = price
                 trade_note = "网格卖出"
+                trade_investment_amount = float(value)
             else:
                 trade_note = ""
 
@@ -1490,6 +1510,7 @@ def backtest_grid_simple(
                     return_pct=0.0,
                     holding_days=0,
                     note=trade_note,
+                    investment_amount=trade_investment_amount,
                 )
             )
         equity.iloc[i] = cash + position * price

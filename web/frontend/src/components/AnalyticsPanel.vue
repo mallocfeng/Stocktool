@@ -12,6 +12,7 @@ const props = defineProps({
   multiFreqs: { type: String, default: 'D,W,M' },
   theme: { type: String, default: 'dark' },
   isMobile: { type: Boolean, default: false },
+  enabledStrategies: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(['selectStrategy']);
@@ -89,10 +90,31 @@ const visibleCategories = computed(() =>
   }),
 );
 
+const moduleDescriptions = {
+  fixed: {
+    title: '固定周期持有',
+    detail: '按照配置周期（如 5,10,20）均匀触发持仓，展示不同周期选股的收益对比与周期贡献。',
+  },
+  tpsl: {
+    title: '止盈 / 止损',
+    detail: '展示止盈/止损阈值如何影响止盈几率与最大回撤，助你校准盈亏比。',
+  },
+  dca: {
+    title: '定投模式',
+    detail: '突出逐步投入与目标收益关系，同时显示定投仓位的渐进变化。',
+  },
+  grid: {
+    title: '网格策略',
+    detail: '呈现网格间距、单网资金与加仓频率，让你评估网格资金占用情况。',
+  },
+};
+
 const activeTab = ref('results');
 const loading = ref(false);
 const tabContentRef = ref(null);
 const selectedResult = ref('');
+const detailEntry = ref(null);
+const detailTrades = computed(() => detailEntry.value?.result?.trades || []);
 const scores = ref([]);
 const positionPlan = ref([]);
 const planMessage = ref('');
@@ -1015,6 +1037,17 @@ const handleResize = () => {
   buyHedgeImpactChartInstance?.resize();
 };
 
+const toggleTradeDetail = (entry) => {
+  detailEntry.value = detailEntry.value?.name === entry.name ? null : entry;
+  if (detailEntry.value && typeof window !== 'undefined') {
+    nextTick(() => {
+      const container = document.querySelector('.trade-detail-panel');
+      if (!container) return;
+      container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+};
+
 const scrollToTabContentIfMobile = () => {
   if (!props.isMobile) return;
   if (typeof window === 'undefined') return;
@@ -1096,6 +1129,12 @@ const heatmapColor = (value) => {
 };
 const formatAmount = (val) =>
   Number.isFinite(Number(val)) ? Number(val).toLocaleString('zh-CN', { maximumFractionDigits: 2 }) : '-';
+const formatDateTime = (val) => {
+  if (!val) return '-';
+  const date = new Date(val);
+  if (!Number.isFinite(date.getTime())) return String(val);
+  return date.toLocaleString('zh-CN', { hour12: false });
+};
 const formatPercent = (val) => {
   const num = Number(val);
   if (!Number.isFinite(num)) return '-';
@@ -1446,6 +1485,30 @@ const reportDrawdownSeries = computed(() => {
   return buildDrawdownFromPairs(equityPairs);
 });
 
+const moduleResults = {
+  fixed: (entry) => entry.name?.startsWith('fixed'),
+  tpsl: (entry) => entry.name?.startsWith('tpsl'),
+  dca: (entry) => entry.name?.startsWith('dca'),
+  grid: (entry) => entry.name?.startsWith('grid'),
+};
+
+const activeModuleCards = computed(() => {
+  if (!props.enabledStrategies?.length) return [];
+  return props.enabledStrategies
+    .map((key, idx) => {
+      const detail = moduleDescriptions[key];
+      if (!detail) return null;
+      const entry = props.results.find((item) => moduleResults[key]?.(item));
+      if (!entry) return null;
+      return {
+        id: `${key}-${idx}`,
+        ...detail,
+        entry,
+      };
+    })
+    .filter(Boolean);
+});
+
 watch(
   () => reportDrawdownSeries.value,
   (series) => {
@@ -1483,31 +1546,97 @@ const isCategoryDisabled = (key) => {
         <p>{{ item.desc }}</p>
       </button>
     </div>
+    <section v-if="activeModuleCards.length" class="module-report-grid">
+      <article v-for="card in activeModuleCards" :key="card.id" class="module-report-card">
+        <div class="module-report-card__icon" aria-hidden="true"></div>
+        <div class="module-report-card__body">
+          <strong>{{ card.title }}</strong>
+          <p>{{ card.detail }}</p>
+          <div class="module-report-card__metrics">
+            <span>
+              总收益
+              <strong :class="card.entry.result.total_return >= 0 ? 'positive' : 'negative'">
+                {{ formatPercent(card.entry.result.total_return) }}
+              </strong>
+            </span>
+            <span>胜率 <strong>{{ formatPercent(card.entry.result.win_rate ?? 0) }}</strong></span>
+            <span>回撤 <strong>{{ formatPercent(card.entry.result.max_drawdown ?? 0) }}</strong></span>
+          </div>
+        </div>
+      </article>
+    </section>
 
     <div class="tab-content" ref="tabContentRef">
       <div v-if="loading" class="loading">数据加载中…</div>
 
-      <section v-if="activeTab === 'results'" class="results-view">
+    <div v-if="activeTab === 'results'" class="results-note-wrapper">
+      <p class="results-note">点击右侧“笔交易”可展开逐笔明细。</p>
+    </div>
+    <section v-if="activeTab === 'results'" class="results-view">
         <div v-if="!results || !results.length" class="empty">请先运行一次回测</div>
         <div v-else class="result-list">
-          <article
-            v-for="entry in results"
-            :key="entry.name"
-            class="result-card"
-            :class="{ selected: selectedResult === entry.name }"
-            @click="selectResult(entry)"
-          >
-            <header>
-              <h3>{{ entry.title }}</h3>
-              <span class="tag">{{ entry.result.trades?.length || 0 }} 笔交易</span>
-            </header>
-            <dl>
-              <div><dt>总收益</dt><dd :class="entry.result.total_return >= 0 ? 'positive' : 'negative'">{{ formatPercent(entry.result.total_return) }}</dd></div>
+            <article
+              v-for="entry in results"
+              :key="entry.name"
+              class="result-card"
+              :class="{ selected: selectedResult === entry.name }"
+              @click="selectResult(entry)"
+            >
+              <header>
+                <h3>{{ entry.title }}</h3>
+              <button
+                type="button"
+                class="tag tag-button"
+                @click.stop.prevent="toggleTradeDetail(entry)"
+              >
+                {{ entry.result.trades?.length || 0 }} 笔交易
+              </button>
+              </header>
+              <dl>
+                <div><dt>总收益</dt><dd :class="entry.result.total_return >= 0 ? 'positive' : 'negative'">{{ formatPercent(entry.result.total_return) }}</dd></div>
               <div><dt>年化</dt><dd>{{ formatPercent(entry.result.annualized_return) }}</dd></div>
               <div><dt>最大回撤</dt><dd>{{ formatPercent(entry.result.max_drawdown) }}</dd></div>
               <div><dt>胜率</dt><dd>{{ formatPercent(entry.result.win_rate) }}</dd></div>
             </dl>
           </article>
+        </div>
+        <div v-if="detailEntry" class="trade-detail-panel">
+          <div class="trade-detail-head">
+            <div>
+              <h4>{{ detailEntry.title }}</h4>
+              <p>以下为该策略的逐笔交易（动态资金可选）</p>
+            </div>
+            <button type="button" class="detail-close" @click="toggleTradeDetail(detailEntry)">收起</button>
+          </div>
+          <div v-if="!detailTrades.length" class="empty small">暂无交易记录</div>
+          <div v-else class="table-wrapper compact-table">
+            <table class="modern-table">
+              <thead>
+                <tr>
+                  <th>开仓时间</th>
+                  <th>平仓时间</th>
+                  <th>持仓天数</th>
+                  <th>入场价</th>
+                  <th>出场价</th>
+                  <th>盈亏 (%)</th>
+                  <th>投资金额</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="trade in detailTrades" :key="`${trade.entry_date}-${trade.exit_date}-${trade.entry_price}`">
+                  <td>{{ formatDateTime(trade.entry_date) }}</td>
+                  <td>{{ formatDateTime(trade.exit_date) }}</td>
+                  <td>{{ trade.holding_days ?? '-' }}</td>
+                  <td>{{ formatAmount(trade.entry_price ?? '-') }}</td>
+                  <td>{{ formatAmount(trade.exit_price ?? '-') }}</td>
+                  <td :class="(trade.return_pct ?? 0) >= 0 ? 'positive' : 'negative'">
+                    {{ formatPercent(trade.return_pct ?? null) }}
+                  </td>
+                  <td>{{ formatAmount(trade.investment_amount ?? '-') }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 

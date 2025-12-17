@@ -906,6 +906,7 @@ const runBacktest = () => {
               <h3>策略模块配置</h3>
               <p>勾选并调整想要启用的模块</p>
             </div>
+            <div class="drawer-ambience" aria-hidden="true"></div>
             <button class="plain-icon close-btn" type="button" @click="closeStrategyDrawer" aria-label="关闭策略模块">
               <span aria-hidden="true"></span>
             </button>
