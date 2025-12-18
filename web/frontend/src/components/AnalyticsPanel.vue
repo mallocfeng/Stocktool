@@ -2375,7 +2375,7 @@ const isCategoryDisabled = (key) => {
   border-radius: 16px;
   border: 1px solid rgba(148, 163, 184, 0.25);
   padding: 16px 18px;
-  box-shadow: 0 10px 30px rgba(2, 6, 23, 0.45);
+  box-shadow: 0 4px 12px rgba(2, 6, 23, 0.08);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -2434,7 +2434,7 @@ const isCategoryDisabled = (key) => {
   border-radius: 18px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   padding: 18px;
-  box-shadow: 0 20px 45px rgba(2, 6, 23, 0.35);
+  box-shadow: 0 4px 12px rgba(2, 6, 23, 0.08);
 }
 .report-header {
   display: flex;
