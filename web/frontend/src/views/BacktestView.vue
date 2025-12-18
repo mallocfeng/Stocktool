@@ -618,17 +618,6 @@ const handleAIMouseLeave = () => {
             ref="mobileConfigHost"
           ></div>
         </div>
-        <section v-if="isMobile" class="card log-panel mobile-log-panel">
-          <div class="panel-header">
-            <h3>运行日志</h3>
-          </div>
-          <div class="log-view">
-            <template v-if="logs.length">
-              <div v-for="(log, idx) in logs" :key="idx">{{ log }}</div>
-            </template>
-            <div v-else class="empty">暂无日志</div>
-          </div>
-        </section>
         <div class="card chart-card">
           <div class="panel-header">
             <div>
@@ -711,6 +700,17 @@ const handleAIMouseLeave = () => {
           :is-mobile="isMobile"
           @select-strategy="handleSelectStrategy"
         />
+        <section v-if="isMobile" class="card log-panel mobile-log-panel">
+          <div class="panel-header">
+            <h3>运行日志</h3>
+          </div>
+          <div class="log-view">
+            <template v-if="logs.length">
+              <div v-for="(log, idx) in logs" :key="idx">{{ log }}</div>
+            </template>
+            <div v-else class="empty">暂无日志</div>
+          </div>
+        </section>
       </section>
     </main>
     <Teleport v-if="configPanelTarget" :to="configPanelTarget">
