@@ -1456,7 +1456,7 @@ label {
 }
 
 .ai-card:not(.expanded):hover {
-  transform: perspective(1000px) rotateX(1.5deg) rotateY(1deg) translateY(-4px);
+  transform: perspective(1000px) rotateX(2deg) rotateY(-1deg) translateY(-4px);
   box-shadow:
     0 20px 40px rgba(var(--overlay-rgb, 18, 48, 126), 0.12),
     0 8px 16px rgba(var(--overlay-rgb, 18, 48, 126), 0.08);
