@@ -67,8 +67,22 @@ const config = reactive({
       hedge: {
         enabled: false,
         mode: 'full',
+        sizeMode: 'ratio',
+        sizeRatio: 100,
+        sizeHands: 1,
+        sizeAmount: 10000,
+        exit: {
+          onMainExit: true,
+          onProfit: false,
+          profitMode: 'percent',
+          profitValue: 3,
+          onLoss: false,
+          lossMode: 'percent',
+          lossValue: 3,
+          onReverse: false,
+        },
       },
-      allowRepeatAfterExit: true,
+      allowRepeatAfterExit: false,
       stepMode: 'fixed',
       stepFixedType: 'percent',
       stepFixedValue: 3,
@@ -119,11 +133,13 @@ const config = reactive({
         profitValue: 2,
         threshold: 30,
       },
+      capitalEnabled: false,
       capitalMode: 'unlimited',
       capitalFixedAmount: '',
       capitalFixedPercent: '',
       capitalIncrementStart: '',
       capitalIncrementStep: '',
+      exitEnabled: false,
       exitMode: 'batch',
       exitBatchPct: 50,
       exitBatchStrategy: 'per_batch',
@@ -139,7 +155,7 @@ const config = reactive({
       baseReferencePrice: '',
       baseReferenceSource: 'first',
       maxAddCount: 5,
-      reference: 'last',
+      reference: 'first',
     },
   },
 });
@@ -606,11 +622,25 @@ const buildStrategiesPayload = () => {
       const stepType = bh.stepFixedType || 'percent';
       const stepPct = stepType === 'percent' ? toRatio(bh.stepFixedValue) : 0;
       const stepAbs = stepType === 'absolute' ? toNumber(bh.stepAbsoluteValue) : 0;
-      const buyHedgeCfg = {
-        hedge: {
-          enabled: Boolean(bh.hedge?.enabled),
-          mode: bh.hedge?.mode || 'full',
-        },
+        const buyHedgeCfg = {
+          hedge: {
+            enabled: Boolean(bh.hedge?.enabled),
+            mode: bh.hedge?.mode || 'full',
+            size_mode: bh.hedge?.sizeMode || 'ratio',
+            size_ratio: toRatio(bh.hedge?.sizeRatio),
+            size_hands: toNumber(bh.hedge?.sizeHands),
+            size_amount: toNumber(bh.hedge?.sizeAmount),
+            exit: {
+              on_main_exit: Boolean(bh.hedge?.exit?.onMainExit),
+              on_profit: Boolean(bh.hedge?.exit?.onProfit),
+              profit_mode: bh.hedge?.exit?.profitMode || 'percent',
+              profit_value: toNumber(bh.hedge?.exit?.profitValue),
+              on_loss: Boolean(bh.hedge?.exit?.onLoss),
+              loss_mode: bh.hedge?.exit?.lossMode || 'percent',
+              loss_value: toNumber(bh.hedge?.exit?.lossValue),
+              on_reverse: Boolean(bh.hedge?.exit?.onReverse),
+            },
+          },
         allow_repeat: Boolean(bh.allowRepeatAfterExit),
         step_mode: bh.stepMode || 'fixed',
         step_type: stepType,
@@ -671,6 +701,7 @@ const buildStrategiesPayload = () => {
           profit_value: toNumber(bh.reverse?.profitValue),
         },
         capital: {
+          enabled: Boolean(bh.capitalEnabled),
           mode: bh.capitalMode || 'unlimited',
           fixed_amount: parseOptionalNumber(bh.capitalFixedAmount),
           fixed_percent: parseOptionalNumber(bh.capitalFixedPercent),
@@ -678,6 +709,7 @@ const buildStrategiesPayload = () => {
           increment_step: parseOptionalNumber(bh.capitalIncrementStep),
         },
         exit: {
+          enabled: Boolean(bh.exitEnabled),
           mode: bh.exitMode || 'batch',
           batch_pct: toNumber(bh.exitBatchPct),
           batch_strategy: bh.exitBatchStrategy || 'per_batch',
@@ -1022,16 +1054,79 @@ const runBacktest = () => {
                         <input type="checkbox" v-model="config.strategies.buyHedge.hedge.enabled" />
                         <span>启用对冲行为（反向头寸或止损/退出）</span>
                       </label>
-                      <label class="field">
-                        <span>对冲模式</span>
-                        <select v-model="config.strategies.buyHedge.hedge.mode">
-                          <option value="full">反向仓全面对冲</option>
-                          <option value="weak">仅反向止损 / 反向退出</option>
-                        </select>
-                      </label>
                       <label class="checkbox-row">
                         <input type="checkbox" v-model="config.strategies.buyHedge.allowRepeatAfterExit" />
                         <span>清仓后允许从开仓条件重新开始</span>
+                      </label>
+                    </div>
+                    <div class="sub-grid" v-if="config.strategies.buyHedge.hedge.enabled">
+                      <label class="field">
+                        <span>对冲模式</span>
+                        <select v-model="config.strategies.buyHedge.hedge.mode">
+                          <option value="full">反向仓跟随</option>
+                          <option value="weak">固定一笔对冲</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>对冲仓位</span>
+                        <select v-model="config.strategies.buyHedge.hedge.sizeMode">
+                          <option value="ratio">当前持仓比例 (%)</option>
+                          <option value="fixed_hands">固定手数（手）</option>
+                          <option value="fixed_amount">固定资金（元）</option>
+                        </select>
+                      </label>
+                      <label class="field" v-if="config.strategies.buyHedge.hedge.sizeMode === 'ratio'">
+                        <span>对冲比例</span>
+                        <input type="number" min="0" v-model="config.strategies.buyHedge.hedge.sizeRatio" />
+                      </label>
+                      <label class="field" v-if="config.strategies.buyHedge.hedge.sizeMode === 'fixed_hands'">
+                        <span>对冲手数</span>
+                        <input type="number" min="0" v-model="config.strategies.buyHedge.hedge.sizeHands" />
+                        <small class="field-hint">单位为手，1 手 = 100 股</small>
+                      </label>
+                      <label class="field" v-if="config.strategies.buyHedge.hedge.sizeMode === 'fixed_amount'">
+                        <span>对冲资金</span>
+                        <input type="number" min="0" v-model="config.strategies.buyHedge.hedge.sizeAmount" />
+                      </label>
+                    </div>
+                    <div class="sub-grid" v-if="config.strategies.buyHedge.hedge.enabled">
+                      <label class="checkbox-row">
+                        <input type="checkbox" v-model="config.strategies.buyHedge.hedge.exit.onMainExit" />
+                        <span>主仓平仓同步结束</span>
+                      </label>
+                      <label class="checkbox-row">
+                        <input type="checkbox" v-model="config.strategies.buyHedge.hedge.exit.onReverse" />
+                        <span>反转信号结束对冲</span>
+                      </label>
+                      <label class="checkbox-row">
+                        <input type="checkbox" v-model="config.strategies.buyHedge.hedge.exit.onProfit" />
+                        <span>对冲盈利结束</span>
+                      </label>
+                      <label class="field" v-if="config.strategies.buyHedge.hedge.exit.onProfit">
+                        <span>盈利类型</span>
+                        <select v-model="config.strategies.buyHedge.hedge.exit.profitMode">
+                          <option value="percent">百分比</option>
+                          <option value="absolute">绝对价差</option>
+                        </select>
+                      </label>
+                      <label class="field" v-if="config.strategies.buyHedge.hedge.exit.onProfit">
+                        <span>盈利阈值</span>
+                        <input type="number" min="0" v-model="config.strategies.buyHedge.hedge.exit.profitValue" />
+                      </label>
+                      <label class="checkbox-row">
+                        <input type="checkbox" v-model="config.strategies.buyHedge.hedge.exit.onLoss" />
+                        <span>对冲亏损结束</span>
+                      </label>
+                      <label class="field" v-if="config.strategies.buyHedge.hedge.exit.onLoss">
+                        <span>亏损类型</span>
+                        <select v-model="config.strategies.buyHedge.hedge.exit.lossMode">
+                          <option value="percent">百分比</option>
+                          <option value="absolute">绝对价差</option>
+                        </select>
+                      </label>
+                      <label class="field" v-if="config.strategies.buyHedge.hedge.exit.onLoss">
+                        <span>亏损阈值</span>
+                        <input type="number" min="0" v-model="config.strategies.buyHedge.hedge.exit.lossValue" />
                       </label>
                     </div>
                   </div>
@@ -1402,6 +1497,16 @@ const runBacktest = () => {
                   <div class="buyhedge-section">
                     <div class="buyhedge-section__title">资金控制 & 离场</div>
                     <div class="sub-grid">
+                      <label class="checkbox-row">
+                        <input type="checkbox" v-model="config.strategies.buyHedge.capitalEnabled" />
+                        <span>启用资金控制</span>
+                      </label>
+                      <label class="checkbox-row">
+                        <input type="checkbox" v-model="config.strategies.buyHedge.exitEnabled" />
+                        <span>启用离场规则</span>
+                      </label>
+                    </div>
+                    <div class="sub-grid" v-if="config.strategies.buyHedge.capitalEnabled">
                       <label class="field">
                         <span>资金模式</span>
                         <select v-model="config.strategies.buyHedge.capitalMode">
@@ -1444,7 +1549,8 @@ const runBacktest = () => {
                         </label>
                       </template>
                     </div>
-                    <div class="sub-grid">
+                    <p class="field-note" v-else>未启用资金控制，将使用当前初始资金作为计算基准。</p>
+                    <div class="sub-grid" v-if="config.strategies.buyHedge.exitEnabled">
                       <label class="field">
                         <span>离场模式</span>
                         <select v-model="config.strategies.buyHedge.exitMode">
@@ -1490,6 +1596,7 @@ const runBacktest = () => {
                         </label>
                       </template>
                     </div>
+                    <p class="field-note" v-else>未启用离场规则，将按默认仓位规模卖出。</p>
                   </div>
                   <div class="buyhedge-section">
                     <div class="buyhedge-section__title">限制 & 初始底仓</div>

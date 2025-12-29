@@ -75,6 +75,7 @@ def _run_backtests(params: BacktestParams, stop_event, emit) -> None:
         raise ValueError(f"CSV 至少需要列：{', '.join(required_cols)}")
 
     df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values("date").reset_index(drop=True)
 
     start_ts = pd.to_datetime(params.start_date) if params.start_date else None
     end_ts = pd.to_datetime(params.end_date) if params.end_date else None
@@ -195,6 +196,12 @@ def _run_backtests(params: BacktestParams, stop_event, emit) -> None:
             if getattr(entry.result, "buy_hedge_events", None):
                 buy_hedge_events_path = os.path.join("results", f"{entry.name}_buy_hedge_events.csv")
                 pd.DataFrame(entry.result.buy_hedge_events).to_csv(buy_hedge_events_path, index=False)
+            if getattr(entry.result, "buy_hedge_hedge_trades", None):
+                buy_hedge_hedge_trades_path = os.path.join("results", f"{entry.name}_buy_hedge_hedge_trades.csv")
+                pd.DataFrame(entry.result.buy_hedge_hedge_trades).to_csv(buy_hedge_hedge_trades_path, index=False)
+            if getattr(entry.result, "buy_hedge_hedge_events", None):
+                buy_hedge_hedge_events_path = os.path.join("results", f"{entry.name}_buy_hedge_hedge_events.csv")
+                pd.DataFrame(entry.result.buy_hedge_hedge_events).to_csv(buy_hedge_hedge_events_path, index=False)
         emit("log", "")
         emit("log", "结果已保存到 ./results 目录下。")
 

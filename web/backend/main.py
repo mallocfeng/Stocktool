@@ -940,6 +940,10 @@ def serialize_backtest_result(res) -> Dict:
         payload["buyHedgeTrades"] = res.buy_hedge_trades
     if getattr(res, "buy_hedge_events", None):
         payload["buyHedgeEvents"] = res.buy_hedge_events
+    if getattr(res, "buy_hedge_hedge_trades", None):
+        payload["buyHedgeHedgeTrades"] = res.buy_hedge_hedge_trades
+    if getattr(res, "buy_hedge_hedge_events", None):
+        payload["buyHedgeHedgeEvents"] = res.buy_hedge_hedge_events
     return payload
 
 @app.post("/run_backtest")

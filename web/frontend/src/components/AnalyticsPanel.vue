@@ -79,7 +79,11 @@ const dynamicAvailable = computed(() =>
 );
 const buyHedgeAvailable = computed(() =>
   props.results.some(
-    (entry) => entry.name === 'buy_hedge' || Boolean(entry.result?.buyHedgeSummary) || Boolean(entry.result?.buyHedgeEvents?.length),
+    (entry) =>
+      entry.name === 'buy_hedge' ||
+      Boolean(entry.result?.buyHedgeSummary) ||
+      Boolean(entry.result?.buyHedgeEvents?.length) ||
+      Boolean(entry.result?.buyHedgeHedgeEvents?.length),
   ),
 );
 const visibleCategories = computed(() =>
@@ -315,6 +319,12 @@ const dynamicTradeSummary = computed(() => {
 const buyHedgeSummary = computed(() => currentEntry.value?.result?.buyHedgeSummary || null);
 const buyHedgeTrades = computed(() => currentEntry.value?.result?.buyHedgeTrades || []);
 const buyHedgeEvents = computed(() => currentEntry.value?.result?.buyHedgeEvents || []);
+const buyHedgeEventRows = computed(() => buyHedgeEvents.value.filter((row) => row?.type && row.type !== 'record'));
+const buyHedgeHedgeTrades = computed(() => currentEntry.value?.result?.buyHedgeHedgeTrades || []);
+const buyHedgeHedgeEvents = computed(() => currentEntry.value?.result?.buyHedgeHedgeEvents || []);
+const buyHedgeHedgeEventRows = computed(() =>
+  buyHedgeHedgeEvents.value.filter((row) => row?.type && row.type !== 'record'),
+);
 const equityCurveStatic = computed(() => {
   const explicitBaseline = dynamicEntry.value?.result?.equityCurveOriginal;
   if (Array.isArray(explicitBaseline) && explicitBaseline.length) return explicitBaseline;
@@ -1326,17 +1336,45 @@ const buyHedgeHedgeLabel = (summary) => {
   if (!summary) return '--';
   const hedge = summary.hedge || {};
   const mode = getSummaryValue(hedge, 'mode') || 'full';
-  const status = hedge.enabled
-    ? mode === 'weak'
-      ? '弱对冲（仅止损/退出）'
-      : '反向仓对冲'
-    : '未启用对冲';
+  const enabled = Boolean(hedge.enabled);
+  if (!enabled) {
+    return getSummaryValue(summary, 'allow_repeat', 'allowRepeat') ? '未启用对冲 / 清仓可重启' : '未启用对冲';
+  }
+  const status = mode === 'weak' ? '固定对冲' : '跟随对冲';
+  const sizeMode = getSummaryValue(hedge, 'size_mode', 'sizeMode') || 'ratio';
+  const sizeRatio = getSummaryValue(hedge, 'size_ratio', 'sizeRatio') ?? 0;
+  const sizeHands = getSummaryValue(hedge, 'size_hands', 'sizeHands') ?? 0;
+  const sizeAmount = getSummaryValue(hedge, 'size_amount', 'sizeAmount') ?? 0;
+  let sizeLabel = '持仓比例';
+  if (sizeMode === 'fixed_hands') {
+    sizeLabel = `固定手数 ${sizeHands || 0} 手`;
+  } else if (sizeMode === 'fixed_amount') {
+    sizeLabel = `固定资金 ${formatAmount(sizeAmount || 0)}`;
+  } else {
+    sizeLabel = `持仓比例 ${formatPercent(sizeRatio || 0)}`;
+  }
+  const exitCfg = getSummaryValue(hedge, 'exit') || {};
+  const exitLabels = [];
+  if (getSummaryValue(exitCfg, 'on_main_exit', 'onMainExit')) exitLabels.push('主仓平仓');
+  if (getSummaryValue(exitCfg, 'on_reverse', 'onReverse')) exitLabels.push('反转信号');
+  if (getSummaryValue(exitCfg, 'on_profit', 'onProfit')) {
+    const mode = getSummaryValue(exitCfg, 'profit_mode', 'profitMode') || 'percent';
+    const value = getSummaryValue(exitCfg, 'profit_value', 'profitValue') ?? 0;
+    exitLabels.push(`对冲止盈 ${mode === 'absolute' ? formatAmount(value) : formatPercent(value)}`);
+  }
+  if (getSummaryValue(exitCfg, 'on_loss', 'onLoss')) {
+    const mode = getSummaryValue(exitCfg, 'loss_mode', 'lossMode') || 'percent';
+    const value = getSummaryValue(exitCfg, 'loss_value', 'lossValue') ?? 0;
+    exitLabels.push(`对冲止损 ${mode === 'absolute' ? formatAmount(value) : formatPercent(value)}`);
+  }
+  const exitLabel = exitLabels.length ? exitLabels.join(' / ') : '不自动退出';
   const repeat = getSummaryValue(summary, 'allow_repeat', 'allowRepeat') ? '清仓后可重启' : '达成后不重启';
-  return `${status} / ${repeat}`;
+  return `${status} / ${sizeLabel} / ${exitLabel} / ${repeat}`;
 };
 const buyHedgeCapitalLabel = (summary) => {
   if (!summary) return '--';
   const capital = summary.capital || {};
+  if (capital.enabled === false) return '未启用';
   const mode = getSummaryValue(capital, 'mode') || 'unlimited';
   if (mode === 'fixed') {
     const amount = getSummaryValue(capital, 'fixed_amount', 'fixedAmount');
@@ -1355,6 +1393,7 @@ const buyHedgeCapitalLabel = (summary) => {
 const buyHedgeExitLabel = (summary) => {
   if (!summary) return '--';
   const exit = summary.exit || {};
+  if (exit.enabled === false) return '未启用';
   const mode = getSummaryValue(exit, 'mode') || 'batch';
   if (mode === 'single') {
     const type = getSummaryValue(exit, 'single_type', 'singleType');
@@ -1519,8 +1558,32 @@ watch(
 );
 
 const buyHedgeEventLabel = (type) => {
-  const map = { entry: '首次买入', add: '加仓', skip: '跳过' };
+  const map = {
+    entry: '首次买入',
+    add: '加仓',
+    buy: '买入',
+    sell: '卖出',
+    exit: '卖出',
+    reverse: '反转信号',
+    skip: '跳过',
+  };
   return map[type] || '记录';
+};
+const buyHedgeHedgeEventLabel = (type) => {
+  const map = {
+    hedge_open: '对冲开仓',
+    hedge_add: '对冲加仓',
+    hedge_reduce: '对冲回补',
+    hedge_close: '对冲平仓',
+  };
+  return map[type] || '记录';
+};
+const buyHedgeHedgeModeLabel = (mode) => (mode === 'weak' ? '固定对冲' : '跟随对冲');
+const buyHedgeHedgeSizeLabel = (row) => {
+  if (!row) return '-';
+  if (row.size_mode === 'fixed_hands') return `${row.size_hands || 0} 手`;
+  if (row.size_mode === 'fixed_amount') return formatAmount(row.size_amount || 0);
+  return formatPercent(row.size_ratio || 0);
 };
 const isCategoryDisabled = (key) => {
   if (key === 'results') return false;
@@ -2094,7 +2157,7 @@ const isCategoryDisabled = (key) => {
                 <h4>买入事件</h4>
                 <span>含首次买入 / 加仓 / 跳过</span>
               </div>
-              <div v-if="!buyHedgeEvents.length" class="empty small">尚无事件记录</div>
+              <div v-if="!buyHedgeEventRows.length" class="empty small">尚无事件记录</div>
               <div v-else>
                 <table class="modern-table">
                   <thead>
@@ -2111,7 +2174,7 @@ const isCategoryDisabled = (key) => {
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="row in buyHedgeEvents.slice(-200)" :key="row.date + (row.type || '') + (row.trigger_price || 0)">
+                    <tr v-for="row in buyHedgeEventRows.slice(-200)" :key="row.date + (row.type || '') + (row.trigger_price || 0)">
                       <td>{{ row.date }}</td>
                       <td>{{ buyHedgeEventLabel(row.type) }}</td>
                       <td>{{ formatAmount(row.price) }}</td>
@@ -2120,6 +2183,82 @@ const isCategoryDisabled = (key) => {
                       <td>{{ formatAmount(row.avg_cost) }}</td>
                       <td>{{ row.trigger_price != null ? formatAmount(row.trigger_price) : '-' }}</td>
                       <td>{{ row.layer != null ? row.layer : '-' }}</td>
+                      <td>{{ row.note || '-' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="table-wrapper compact-table">
+              <div class="panel-header">
+                <h4>对冲交易</h4>
+                <span>反向仓对冲记录</span>
+              </div>
+              <div v-if="!buyHedgeHedgeTrades.length" class="empty small">暂无对冲交易</div>
+              <div v-else>
+                <table class="modern-table">
+                  <thead>
+                    <tr>
+                      <th>开仓时间</th>
+                      <th>平仓时间</th>
+                      <th>开仓价</th>
+                      <th>平仓价</th>
+                      <th>数量（手）</th>
+                      <th>盈亏</th>
+                      <th>收益率</th>
+                      <th>模式</th>
+                      <th>仓位</th>
+                      <th>备注</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in buyHedgeHedgeTrades" :key="row.trade_id || row.entry_date + (row.exit_date || '')">
+                      <td>{{ row.entry_date }}</td>
+                      <td>{{ row.exit_date }}</td>
+                      <td>{{ formatAmount(row.entry_price) }}</td>
+                      <td>{{ formatAmount(row.exit_price) }}</td>
+                      <td>{{ formatHandsValue(row.total_shares) }}</td>
+                      <td :class="(row.pnl ?? 0) >= 0 ? 'positive' : 'negative'">{{ formatAmount(row.pnl) }}</td>
+                      <td :class="(row.return_pct ?? 0) >= 0 ? 'positive' : 'negative'">
+                        {{ formatPercent(row.return_pct ?? 0) }}
+                      </td>
+                      <td>{{ buyHedgeHedgeModeLabel(row.mode) }}</td>
+                      <td>{{ buyHedgeHedgeSizeLabel(row) }}</td>
+                      <td>{{ row.note || '-' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="table-wrapper compact-table">
+              <div class="panel-header">
+                <h4>对冲事件</h4>
+                <span>开仓 / 回补 / 平仓</span>
+              </div>
+              <div v-if="!buyHedgeHedgeEventRows.length" class="empty small">尚无对冲事件</div>
+              <div v-else>
+                <table class="modern-table">
+                  <thead>
+                    <tr>
+                      <th>时间</th>
+                      <th>类型</th>
+                      <th>价格</th>
+                      <th>数量（手）</th>
+                      <th>当前对冲（手）</th>
+                      <th>均价</th>
+                      <th>触发价</th>
+                      <th>备注</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in buyHedgeHedgeEventRows.slice(-200)" :key="row.date + (row.type || '') + (row.trigger_price || 0)">
+                      <td>{{ row.date }}</td>
+                      <td>{{ buyHedgeHedgeEventLabel(row.type) }}</td>
+                      <td>{{ formatAmount(row.price) }}</td>
+                      <td>{{ formatHandsValue(row.shares) }}</td>
+                      <td>{{ formatHandsValue(row.total_shares) }}</td>
+                      <td>{{ row.avg_price != null ? formatAmount(row.avg_price) : '-' }}</td>
+                      <td>{{ row.trigger_price != null ? formatAmount(row.trigger_price) : '-' }}</td>
                       <td>{{ row.note || '-' }}</td>
                     </tr>
                   </tbody>

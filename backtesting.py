@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
+import math
 from typing import List, Optional, Dict, Any, Tuple
 
 import numpy as np
@@ -50,6 +51,8 @@ class BacktestResult:
     buy_hedge_summary: Optional[Dict[str, Any]] = None
     buy_hedge_trades: Optional[List[Dict[str, Any]]] = None
     buy_hedge_events: Optional[List[Dict[str, Any]]] = None
+    buy_hedge_hedge_trades: Optional[List[Dict[str, Any]]] = None
+    buy_hedge_hedge_events: Optional[List[Dict[str, Any]]] = None
 
     def to_dict(self):
         d = asdict(self)
@@ -160,6 +163,8 @@ def backtest_fixed_period(
         df.set_index("date", inplace=True)
 
     close = df["close"]
+    high = df["high"]
+    low = df["low"]
     idx = df.index
 
     cash = initial_capital
@@ -930,77 +935,385 @@ def backtest_buy_hedge(
             return None
         return int(value // LOT_SIZE)
 
+    step_mode = str(config.get("step_mode") or "fixed").lower()
     step_type = str(config.get("step_type") or "percent").lower()
     step_pct = to_float(config.get("step_pct"), 0.0)
+    step_abs = to_float(config.get("step_abs"), 0.0)
+    step_rounding = str(config.get("step_rounding") or "round").lower()
     if step_type in {"percent", "percentage"} and step_pct > 1:
         step_pct /= 100.0
     step_pct = max(0.0, float(step_pct))
-    start_position_hands_raw = max(0, to_int(config.get("start_position"), 0))
-    increment_unit_hands_raw = max(0, to_int(config.get("increment_unit"), 0))
-    start_position_shares = lot_align(start_position_hands_raw * LOT_SIZE)
-    increment_unit_shares = lot_align(increment_unit_hands_raw * LOT_SIZE)
+    step_abs = max(0.0, float(step_abs))
+
+    def round_price(value: float) -> float:
+        if step_rounding == "floor":
+            return math.floor(value * 100) / 100
+        if step_rounding == "ceil":
+            return math.ceil(value * 100) / 100
+        return round(value, 2)
+
+    if step_type == "absolute" and step_abs > 0:
+        step_abs = round_price(step_abs)
+
+    start_position_shares_raw = max(0, to_int(config.get("start_position"), 0))
+    increment_unit_shares_raw = max(0, to_int(config.get("increment_unit"), 0))
+    start_position_shares = lot_align(start_position_shares_raw)
+    increment_unit_shares = lot_align(increment_unit_shares_raw)
     start_position_hands = shares_to_hands(start_position_shares) or 0
     increment_unit_hands = shares_to_hands(increment_unit_shares) or 0
-    mode = str(config.get("mode") or "equal").lower()
-    max_adds = to_int(config.get("max_adds"), 0)
-    reference = str(config.get("reference") or "last").lower()
-    max_capital_value = to_float(config.get("max_capital"), 0.0)
-    max_capital_ratio = to_float(config.get("max_capital_ratio"), 0.0)
-    max_capital_input = config.get("max_capital_input")
-    if (max_capital_value <= 0) and max_capital_ratio > 0:
-        max_capital_value = initial_capital * max_capital_ratio
+
+    growth_cfg = config.get("growth", {}) or {}
+    growth_mode = str(growth_cfg.get("mode") or config.get("mode") or "equal").lower()
+
+    position_cfg = config.get("position", {}) or {}
+    position_mode = str(position_cfg.get("mode") or "fixed").lower()
+    position_fixed_pct = to_float(position_cfg.get("fixed_pct"), 0.0)
+    position_inc_start_pct = to_float(position_cfg.get("inc_start_pct"), 0.0)
+    position_inc_step_pct = to_float(position_cfg.get("inc_step_pct"), 0.0)
+
+    capital_cfg = config.get("capital", {}) or {}
+    capital_enabled = capital_cfg.get("enabled")
+    if capital_enabled is None:
+        capital_enabled = True
+    capital_mode = str(capital_cfg.get("mode") or "unlimited").lower()
+    capital_fixed_amount = to_float(capital_cfg.get("fixed_amount"), 0.0)
+    capital_fixed_percent = to_float(capital_cfg.get("fixed_percent"), 0.0)
+    capital_increment_start = to_float(capital_cfg.get("increment_start"), 0.0)
+    capital_increment_step = to_float(capital_cfg.get("increment_step"), 0.0)
+    if not capital_enabled:
+        capital_mode = "unlimited"
+        capital_fixed_amount = 0.0
+        capital_fixed_percent = 0.0
+        capital_increment_start = 0.0
+        capital_increment_step = 0.0
+
+    limits_cfg = config.get("limits", {}) or {}
+    limit_buy_price = to_float(limits_cfg.get("limit_buy_price"), 0.0)
+    limit_sell_price = to_float(limits_cfg.get("limit_sell_price"), 0.0)
+    min_price = to_float(limits_cfg.get("min_price"), 0.0)
+    stop_adding_at_min = bool(limits_cfg.get("stop_adding_at_min"))
+
+    base_cfg = config.get("base", {}) or {}
+    base_initial_hands = max(0, to_int(base_cfg.get("initial_hands"), 0))
+    base_initial_shares = lot_align(base_initial_hands * LOT_SIZE)
+    base_reference_price = to_float(base_cfg.get("reference_price"), 0.0)
+    base_reference_source = str(base_cfg.get("reference_source") or "first").lower()
+
+    reference_mode = str(config.get("reference") or "first").lower()
+    if reference_mode == "last":
+        reference_mode = "first"
 
     hedge_cfg = config.get("hedge", {}) or {}
     hedge_enabled = bool(hedge_cfg.get("enabled"))
     hedge_mode = str(hedge_cfg.get("mode") or "full").lower()
+    hedge_size_mode = str(hedge_cfg.get("size_mode") or "ratio").lower()
+    hedge_size_ratio = to_float(hedge_cfg.get("size_ratio"), 0.0)
+    if hedge_size_ratio > 1:
+        hedge_size_ratio = hedge_size_ratio / 100.0
+    hedge_size_hands = max(0, to_int(hedge_cfg.get("size_hands"), 0))
+    hedge_size_amount = max(0.0, to_float(hedge_cfg.get("size_amount"), 0.0))
+    hedge_exit_cfg = hedge_cfg.get("exit", {}) or {}
+    hedge_exit_on_main = hedge_exit_cfg.get("on_main_exit")
+    if hedge_exit_on_main is None:
+        hedge_exit_on_main = True
+    hedge_exit_on_profit = bool(hedge_exit_cfg.get("on_profit"))
+    hedge_exit_profit_mode = str(hedge_exit_cfg.get("profit_mode") or "percent").lower()
+    hedge_exit_profit_value = to_float(hedge_exit_cfg.get("profit_value"), 0.0)
+    hedge_exit_on_loss = bool(hedge_exit_cfg.get("on_loss"))
+    hedge_exit_loss_mode = str(hedge_exit_cfg.get("loss_mode") or "percent").lower()
+    hedge_exit_loss_value = to_float(hedge_exit_cfg.get("loss_value"), 0.0)
+    hedge_exit_on_reverse = bool(hedge_exit_cfg.get("on_reverse"))
     allow_repeat = bool(config.get("allow_repeat"))
+    max_adds = to_int(config.get("max_adds"), 0)
+    exit_cfg = config.get("exit", {}) or {}
+    exit_enabled = exit_cfg.get("enabled")
+    if exit_enabled is None:
+        exit_enabled = True
+    exit_mode = str(exit_cfg.get("mode") or "batch").lower()
+    exit_batch_pct = to_float(exit_cfg.get("batch_pct"), 0.0)
+    exit_batch_strategy = str(exit_cfg.get("batch_strategy") or "per_batch").lower()
+    exit_batch_step_pct = to_float(exit_cfg.get("batch_step_pct"), 0.0)
+    if not exit_enabled:
+        exit_mode = "batch"
+        exit_batch_pct = 0.0
+        exit_batch_step_pct = 0.0
+
+    entry_cfg = config.get("entry", {}) or {}
+    entry_mode = str(entry_cfg.get("mode") or "none").lower()
+    entry_ma_fast = max(0, to_int(entry_cfg.get("ma_fast"), 0))
+    entry_ma_slow = max(0, to_int(entry_cfg.get("ma_slow"), 0))
+    entry_ma_period = max(0, to_int(entry_cfg.get("ma_period"), 0))
+    entry_progressive_count = max(1, to_int(entry_cfg.get("progressive_count"), 1))
+
+    profit_cfg = config.get("profit", {}) or {}
+    profit_mode = str(profit_cfg.get("mode") or "percent").lower()
+    profit_target_pct = to_float(profit_cfg.get("target_pct"), 0.0)
+    if profit_target_pct > 1:
+        profit_target_pct /= 100.0
+    profit_target_pct = max(0.0, profit_target_pct)
+    profit_target_abs = max(0.0, to_float(profit_cfg.get("target_abs"), 0.0))
+    profit_reference = str(profit_cfg.get("reference") or "overall").lower()
+    profit_per_batch = bool(profit_cfg.get("per_batch"))
+
+    reverse_cfg = config.get("reverse", {}) or {}
+    reverse_enabled = bool(reverse_cfg.get("enabled"))
+    reverse_indicator = str(reverse_cfg.get("indicator") or "rsi").lower()
+    reverse_interval = max(1, to_int(reverse_cfg.get("interval"), 0)) or 14
+    reverse_filter_mode = str(reverse_cfg.get("filter_mode") or "consecutive").lower()
+    reverse_filter_value = max(1, to_int(reverse_cfg.get("filter_value"), 0))
+    reverse_min_hits = max(1, to_int(reverse_cfg.get("min_hits"), 0))
+    reverse_threshold = to_float(reverse_cfg.get("threshold"), 0.0)
+    reverse_action = str(reverse_cfg.get("action") or "exit").lower()
+    reverse_profit_type = str(reverse_cfg.get("profit_type") or "percent").lower()
+    reverse_profit_value = to_float(reverse_cfg.get("profit_value"), 0.0)
+
+    step_auto_cfg = config.get("step_auto", {}) or {}
+    step_auto_method = str(step_auto_cfg.get("method") or "atr").lower()
+    step_auto_atr_period = max(1, to_int(step_auto_cfg.get("atr_period"), 0)) or 14
+    step_auto_atr_multiplier = to_float(step_auto_cfg.get("atr_multiplier"), 1.0) or 1.0
+    step_auto_avg_len = max(1, to_int(step_auto_cfg.get("avg_range_length"), 0)) or 10
+    step_auto_avg_multiplier = to_float(step_auto_cfg.get("avg_range_multiplier"), 1.0) or 1.0
+    step_auto_std_period = max(1, to_int(step_auto_cfg.get("std_period"), 0)) or 20
+    step_auto_std_multiplier = to_float(step_auto_cfg.get("std_multiplier"), 1.0) or 1.0
+    step_auto_ma_fast = max(1, to_int(step_auto_cfg.get("ma_fast"), 0)) or 5
+    step_auto_ma_slow = max(1, to_int(step_auto_cfg.get("ma_slow"), 0)) or 20
+    step_auto_ma_gap_pct = to_float(step_auto_cfg.get("ma_gap_pct"), 0.0)
+
+    close_series = close.astype(float)
+    high_series = high.astype(float)
+    low_series = low.astype(float)
+
+    def compute_rsi(series: pd.Series, period: int) -> pd.Series:
+        delta = series.diff()
+        gain = delta.clip(lower=0)
+        loss = (-delta).clip(lower=0)
+        avg_gain = gain.rolling(period).mean()
+        avg_loss = loss.rolling(period).mean()
+        rs = avg_gain / avg_loss.replace(0, np.nan)
+        rsi = 100 - (100 / (1 + rs))
+        return rsi.fillna(0.0)
+
+    def compute_kdj(close_s: pd.Series, high_s: pd.Series, low_s: pd.Series, period: int) -> Tuple[pd.Series, pd.Series]:
+        low_n = low_s.rolling(period).min()
+        high_n = high_s.rolling(period).max()
+        rsv = ((close_s - low_n) / (high_n - low_n).replace(0, np.nan)) * 100.0
+        rsv = rsv.fillna(50.0)
+        k_vals = []
+        d_vals = []
+        k_prev = 50.0
+        d_prev = 50.0
+        for val in rsv:
+            k_prev = (2.0 / 3.0) * k_prev + (1.0 / 3.0) * float(val)
+            d_prev = (2.0 / 3.0) * d_prev + (1.0 / 3.0) * k_prev
+            k_vals.append(k_prev)
+            d_vals.append(d_prev)
+        return pd.Series(k_vals, index=close_s.index), pd.Series(d_vals, index=close_s.index)
+
+    entry_fast_ma = close_series.rolling(entry_ma_fast).mean() if entry_ma_fast > 0 else None
+    entry_slow_ma = close_series.rolling(entry_ma_slow).mean() if entry_ma_slow > 0 else None
+    entry_single_ma = close_series.rolling(entry_ma_period).mean() if entry_ma_period > 0 else None
+    entry_base = pd.Series(False, index=idx)
+    if entry_mode != "none":
+        if entry_fast_ma is not None and entry_slow_ma is not None:
+            entry_base = entry_fast_ma > entry_slow_ma
+        elif entry_single_ma is not None:
+            entry_base = close_series > entry_single_ma
+
+    auto_step_abs_series = None
+    auto_step_pct_series = None
+    if step_mode == "auto":
+        if step_auto_method == "atr":
+            prev_close = close_series.shift(1)
+            tr = pd.concat(
+                [
+                    (high_series - low_series).abs(),
+                    (high_series - prev_close).abs(),
+                    (low_series - prev_close).abs(),
+                ],
+                axis=1,
+            ).max(axis=1)
+            atr = tr.rolling(step_auto_atr_period).mean()
+            auto_step_abs_series = atr * step_auto_atr_multiplier
+        elif step_auto_method == "avg_range":
+            avg_range = (high_series - low_series).abs().rolling(step_auto_avg_len).mean()
+            auto_step_abs_series = avg_range * step_auto_avg_multiplier
+        elif step_auto_method == "stddev":
+            stddev = close_series.rolling(step_auto_std_period).std()
+            auto_step_abs_series = stddev * step_auto_std_multiplier
+        elif step_auto_method == "ma_gap":
+            ma_fast = close_series.rolling(step_auto_ma_fast).mean()
+            ma_slow = close_series.rolling(step_auto_ma_slow).mean()
+            gap_pct = abs(step_auto_ma_gap_pct) / 100.0
+            auto_step_pct_series = (ma_fast - ma_slow).abs() / ma_slow.replace(0, np.nan)
+            auto_step_pct_series = auto_step_pct_series.fillna(0.0).clip(lower=gap_pct)
+
+    reverse_base = pd.Series(False, index=idx)
+    if reverse_enabled:
+        if reverse_indicator == "rsi":
+            rsi = compute_rsi(close_series, reverse_interval)
+            if reverse_threshold > 50:
+                reverse_base = rsi >= reverse_threshold
+            else:
+                reverse_base = rsi <= reverse_threshold
+        elif reverse_indicator == "macd":
+            ema_fast = close_series.ewm(span=12, adjust=False).mean()
+            ema_slow = close_series.ewm(span=26, adjust=False).mean()
+            dif = ema_fast - ema_slow
+            dea = dif.ewm(span=9, adjust=False).mean()
+            reverse_base = (dif > dea) & (dif.shift(1) <= dea.shift(1))
+        elif reverse_indicator == "kdj":
+            k_val, d_val = compute_kdj(close_series, high_series, low_series, reverse_interval)
+            reverse_base = (k_val > d_val) & (k_val.shift(1) <= d_val.shift(1))
+        elif reverse_indicator == "ma_turn":
+            ma_val = close_series.rolling(reverse_interval).mean()
+            reverse_base = (ma_val > ma_val.shift(1)) & (ma_val.shift(1) <= ma_val.shift(2))
+        else:
+            rolling_low = low_series.rolling(reverse_interval).min()
+            reverse_base = (low_series <= rolling_low) & (close_series > close_series.shift(1))
 
     cash = float(initial_capital)
     position = 0
     position_cost = 0.0
-    entry_idx: Optional[int] = None
-    entry_price0 = 0.0
-    last_add_price = 0.0
-    add_count = 0
-    current_trade_id = 0
-    can_add_more = True
+    reference_price: Optional[float] = None
+    if base_reference_source == "custom" and base_reference_price > 0:
+        reference_price = float(base_reference_price)
+    grid_index = 0
 
     trades: List[Trade] = []
     buy_hedge_trades: List[Dict[str, Any]] = []
     events: List[Dict[str, Any]] = []
+    hedge_trades: List[Dict[str, Any]] = []
+    hedge_events: List[Dict[str, Any]] = []
 
-    trade_add_records: List[int] = []
-    max_layers = 0
     trade_count = 0
+    total_adds = 0
+    max_layers = 0
     avg_cost_reduction_sum = 0.0
     max_capital_used = 0.0
     skipped_by_cash = 0
     skipped_by_limit = 0
     skipped_by_rule = 0
-    t1_guard = TPlusOneGuard()
-    pending_exit = False
-    pending_exit_reason = ""
+    current_trade_id = 0
+    current_hedge_trade_id = 0
+    hedge_trade_count = 0
 
-    def compute_trigger_price() -> Optional[float]:
-        if position <= 0 or step_pct <= 0 or entry_price0 <= 0:
-            return None
-        if reference == "first":
-            target_level = add_count + 1
-            trigger = entry_price0 * (1 - step_pct * target_level)
+    cycle_entry_idx: Optional[int] = None
+    cycle_entry_price = 0.0
+    cycle_buy_shares = 0
+    cycle_cost_total = 0.0
+    cycle_sell_total = 0.0
+    cycle_add_count = 0
+    cycle_buy_count = 0
+    cycle_max_shares = 0
+    cycle_max_cost = 0.0
+
+    t1_guard = TPlusOneGuard()
+    entry_ready = entry_mode == "none"
+    entry_hits = 0
+    trading_active = entry_ready
+    base_init_done = base_initial_shares <= 0
+    last_buy_price = 0.0
+    profit_override: Optional[Tuple[str, float]] = None
+    reverse_hits = 0
+    reverse_window: List[bool] = []
+    hedge_position = 0
+    hedge_avg_price = 0.0
+    hedge_cash = 0.0
+    hedge_entry_idx: Optional[int] = None
+    hedge_entry_price = 0.0
+    hedge_entry_value = 0.0
+    hedge_max_shares = 0
+    hedge_paused = False
+
+    def resolve_position_pct(layer_index: int) -> float:
+        if position_mode == "increment":
+            pct = position_inc_start_pct + layer_index * position_inc_step_pct
         else:
-            ref_price = last_add_price if last_add_price > 0 else entry_price0
-            trigger = ref_price * (1 - step_pct)
-        return max(trigger, 0.0)
+            pct = position_fixed_pct
+        return max(0.0, float(pct)) / 100.0
+
+    def resolve_capital_base(layer_index: int) -> float:
+        if capital_mode == "fixed":
+            if capital_fixed_amount > 0:
+                return float(capital_fixed_amount)
+            if capital_fixed_percent > 0:
+                return float(initial_capital) * (capital_fixed_percent / 100.0)
+        elif capital_mode == "increment":
+            pct = capital_increment_start + layer_index * capital_increment_step
+            if pct > 0:
+                return float(initial_capital) * (pct / 100.0)
+        return float(initial_capital)
 
     def quantity_for_add(layer_index: int) -> int:
-        if mode == "increment":
+        if growth_mode == "increment":
             qty = start_position_shares + layer_index * increment_unit_shares
-        elif mode == "double":
+        elif growth_mode == "double":
             qty = int(round(start_position_shares * (2 ** layer_index)))
         else:
             qty = start_position_shares
-        qty = lot_align(int(qty))
-        return max(0, int(qty))
+        return lot_align(int(qty))
+
+    def desired_shares(layer_index: int, price: float) -> int:
+        pct = resolve_position_pct(layer_index)
+        if pct > 0:
+            capital_base = resolve_capital_base(layer_index)
+            target_amount = capital_base * pct
+            return lot_align(int(target_amount // price))
+        return quantity_for_add(layer_index)
+
+    def exit_shares_for_sell(price: float) -> int:
+        if exit_mode == "single":
+            return int(position)
+        pct = 0.0
+        if exit_batch_strategy == "per_step" and exit_batch_step_pct > 0:
+            pct = exit_batch_step_pct
+        elif exit_batch_pct > 0:
+            pct = exit_batch_pct
+        if pct <= 0:
+            return desired_shares(max(cycle_buy_count - 1, 0), price)
+        return lot_align(int(position * (pct / 100.0)))
+
+    def compute_triggers(
+        base_price: float,
+        grid_idx: int,
+        step_type_value: str,
+        step_pct_value: float,
+        step_abs_value: float,
+    ) -> Tuple[Optional[float], Optional[float]]:
+        if step_type_value == "absolute":
+            if step_abs_value <= 0:
+                return None, None
+            if reference_mode == "last":
+                up = base_price + step_abs_value
+                down = base_price - step_abs_value
+            else:
+                up = base_price + step_abs_value * (grid_idx + 1)
+                down = base_price + step_abs_value * (grid_idx - 1)
+            return round_price(up), round_price(down)
+        if step_pct_value <= 0:
+            return None, None
+        if reference_mode == "last":
+            up = base_price * (1 + step_pct_value)
+            down = base_price * (1 - step_pct_value)
+        else:
+            up = base_price * (1 + step_pct_value * (grid_idx + 1))
+            down = base_price * (1 + step_pct_value * (grid_idx - 1))
+        return up, down
+
+    def resolve_step_values(index: int) -> Tuple[str, float, float]:
+        if step_mode != "auto":
+            return step_type, step_pct, step_abs
+        if auto_step_pct_series is not None:
+            val = float(auto_step_pct_series.iloc[index])
+            if not np.isfinite(val) or val <= 0:
+                return "percent", 0.0, 0.0
+            return "percent", max(0.0, val), 0.0
+        if auto_step_abs_series is not None:
+            val = float(auto_step_abs_series.iloc[index])
+            if not np.isfinite(val) or val <= 0:
+                return "absolute", 0.0, 0.0
+            return "absolute", 0.0, round_price(val)
+        return step_type, step_pct, step_abs
 
     def append_event(event: Dict[str, Any]) -> None:
         payload = event.copy()
@@ -1013,254 +1326,769 @@ def backtest_buy_hedge(
             payload["total_shares"] = shares_to_hands(int(payload["total_shares"]))
         events.append(payload)
 
+    def append_hedge_event(event: Dict[str, Any]) -> None:
+        payload = event.copy()
+        payload["trade_id"] = current_hedge_trade_id if current_hedge_trade_id else None
+        payload["date"] = str(event.get("date"))
+        payload["type"] = event.get("type", "record")
+        if "shares" in payload and payload["shares"] is not None:
+            payload["shares"] = shares_to_hands(int(payload["shares"]))
+        if "total_shares" in payload and payload["total_shares"] is not None:
+            payload["total_shares"] = shares_to_hands(int(payload["total_shares"]))
+        hedge_events.append(payload)
+
+    def resolve_hedge_target(price: float) -> int:
+        if price <= 0 or position <= 0:
+            return 0
+        target_shares = 0.0
+        if hedge_size_mode == "ratio":
+            ratio = hedge_size_ratio
+            if ratio > 1:
+                ratio = ratio / 100.0
+            ratio = max(0.0, ratio)
+            target_shares = position * ratio
+        elif hedge_size_mode == "fixed_hands":
+            target_shares = hedge_size_hands * LOT_SIZE
+        elif hedge_size_mode == "fixed_amount":
+            if hedge_size_amount > 0:
+                target_shares = hedge_size_amount // price
+        return lot_align(int(target_shares))
+
+    def hedge_profit_trigger() -> Optional[float]:
+        if hedge_avg_price <= 0 or hedge_position <= 0:
+            return None
+        value = hedge_exit_profit_value
+        if hedge_exit_profit_mode == "percent" and value > 1:
+            value /= 100.0
+        if value <= 0:
+            return None
+        if hedge_exit_profit_mode == "percent":
+            return hedge_avg_price * (1 - value)
+        return hedge_avg_price - value
+
+    def hedge_loss_trigger() -> Optional[float]:
+        if hedge_avg_price <= 0 or hedge_position <= 0:
+            return None
+        value = hedge_exit_loss_value
+        if hedge_exit_loss_mode == "percent" and value > 1:
+            value /= 100.0
+        if value <= 0:
+            return None
+        if hedge_exit_loss_mode == "percent":
+            return hedge_avg_price * (1 + value)
+        return hedge_avg_price + value
+
+    def hedge_open(exec_date: pd.Timestamp, exec_price: float, shares: int, note: str, trigger_price: Optional[float]) -> None:
+        nonlocal hedge_position, hedge_avg_price, hedge_cash, hedge_entry_idx
+        nonlocal hedge_entry_price, hedge_entry_value, hedge_max_shares, current_hedge_trade_id
+        if shares <= 0:
+            return
+        proceeds = shares * exec_price
+        fee = proceeds * fee_rate
+        hedge_cash += proceeds - fee
+        total_shares = hedge_position + shares
+        hedge_avg_price = (
+            (hedge_avg_price * hedge_position + exec_price * shares) / total_shares if hedge_position > 0 else exec_price
+        )
+        hedge_position = total_shares
+        if hedge_entry_idx is None:
+            hedge_entry_idx = i
+            current_hedge_trade_id = hedge_trade_count + 1
+        hedge_entry_price = hedge_avg_price
+        hedge_entry_value = max(hedge_entry_value, hedge_position * hedge_entry_price)
+        hedge_max_shares = max(hedge_max_shares, hedge_position)
+        append_hedge_event(
+            {
+                "date": exec_date,
+                "price": float(exec_price),
+                "shares": int(shares),
+                "total_shares": int(hedge_position),
+                "avg_price": float(hedge_avg_price),
+                "type": "hedge_open" if hedge_position == shares else "hedge_add",
+                "note": note,
+                "trigger_price": float(trigger_price) if trigger_price is not None else None,
+            }
+        )
+
+    def hedge_cover(
+        exec_date: pd.Timestamp, exec_price: float, shares: int, note: str, trigger_price: Optional[float]
+    ) -> None:
+        nonlocal hedge_position, hedge_avg_price, hedge_cash, hedge_entry_idx
+        nonlocal hedge_entry_price, hedge_entry_value, hedge_max_shares, current_hedge_trade_id, hedge_trade_count, cash
+        if shares <= 0 or hedge_position <= 0:
+            return
+        cover_shares = min(hedge_position, shares)
+        cost = cover_shares * exec_price
+        fee = cost * fee_rate
+        hedge_cash -= cost + fee
+        hedge_position -= cover_shares
+        append_hedge_event(
+            {
+                "date": exec_date,
+                "price": float(exec_price),
+                "shares": int(cover_shares),
+                "total_shares": int(hedge_position),
+                "avg_price": float(hedge_avg_price) if hedge_avg_price > 0 else None,
+                "type": "hedge_close" if hedge_position == 0 else "hedge_reduce",
+                "note": note,
+                "trigger_price": float(trigger_price) if trigger_price is not None else None,
+            }
+        )
+        if hedge_position == 0:
+            entry_date = idx[hedge_entry_idx] if hedge_entry_idx is not None else exec_date
+            entry_price = hedge_entry_price if hedge_entry_price > 0 else exec_price
+            entry_value = hedge_entry_value if hedge_entry_value > 0 else entry_price * cover_shares
+            pnl = hedge_cash
+            return_pct = pnl / entry_value if entry_value > 0 else 0.0
+            hedge_trades.append(
+                {
+                    "trade_id": current_hedge_trade_id or hedge_trade_count + 1,
+                    "entry_date": str(entry_date),
+                    "exit_date": str(exec_date),
+                    "entry_price": float(entry_price),
+                    "exit_price": float(exec_price),
+                    "total_shares": shares_to_hands(int(hedge_max_shares)) if hedge_max_shares > 0 else 0,
+                    "pnl": float(pnl),
+                    "return_pct": float(return_pct),
+                    "mode": hedge_mode,
+                    "size_mode": hedge_size_mode,
+                    "size_ratio": float(hedge_size_ratio),
+                    "size_hands": int(hedge_size_hands),
+                    "size_amount": float(hedge_size_amount),
+                    "note": note,
+                }
+            )
+            hedge_trade_count += 1
+            cash += hedge_cash
+            hedge_cash = 0.0
+            hedge_avg_price = 0.0
+            hedge_entry_idx = None
+            hedge_entry_price = 0.0
+            hedge_entry_value = 0.0
+            hedge_max_shares = 0
+            current_hedge_trade_id = 0
+
     for i, date in enumerate(idx):
-        raw_price = close.iloc[i]
+        raw_close = close.iloc[i]
+        raw_high = high.iloc[i]
+        raw_low = low.iloc[i]
         try:
-            price = float(raw_price)
+            close_price = float(raw_close)
+            high_price = float(raw_high)
+            low_price = float(raw_low)
         except (TypeError, ValueError):
-            price = float("nan")
-        if not np.isfinite(price) or price <= 0:
+            close_price = float("nan")
+            high_price = float("nan")
+            low_price = float("nan")
+        if not np.isfinite(close_price) or close_price <= 0:
             prev = equity.iloc[i - 1] if i > 0 else cash
             equity.iloc[i] = prev
             continue
+        if not np.isfinite(high_price) or high_price <= 0:
+            high_price = close_price
+        if not np.isfinite(low_price) or low_price <= 0:
+            low_price = close_price
 
-        added_this_bar = False
-        exited_this_bar = False
-        event_type = None
-        event_shares = 0
-        event_note = None
+        main_exit = False
+        main_exit_price: Optional[float] = None
+        main_exit_reason: Optional[str] = None
 
-        should_exit = position > 0 and (pending_exit or sell.iloc[i])
-        if should_exit:
-            if not t1_guard.can_sell(date, position):
-                pending_exit = True
-                pending_exit_reason = pending_exit_reason or "卖出信号"
+        entry_signal = False
+        if not entry_ready:
+            if entry_mode == "ma":
+                prev = bool(entry_base.iloc[i - 1]) if i > 0 else False
+                entry_signal = bool(entry_base.iloc[i]) and not prev
+            elif entry_mode == "ma_progressive":
+                if bool(entry_base.iloc[i]):
+                    entry_hits += 1
+                else:
+                    entry_hits = 0
+                entry_signal = entry_hits >= entry_progressive_count
             else:
-                t1_guard.consume(date, position)
-                exit_price = price
-                value = position * exit_price
-                exit_fee = value * fee_rate
-                cash += value - exit_fee
-                avg_cost = position_cost / position if position > 0 else 0.0
-                pnl = value - exit_fee - position_cost
-                entry_date = idx[entry_idx] if entry_idx is not None else date
-                days_hold = (date - entry_date).days if entry_idx is not None else 0
-                trades.append(
-                    Trade(
-                        entry_date=entry_date,
-                        exit_date=date,
-                        entry_price=float(entry_price0),
-                        exit_price=float(exit_price),
-                        return_pct=float((exit_price - entry_price0) / entry_price0) if entry_price0 else 0.0,
-                        holding_days=int(days_hold),
-                        note="买入对冲",
-                        investment_amount=float(position_cost) if position_cost else None,
-                    )
-                )
-                cost_reduction = ((entry_price0 - avg_cost) / entry_price0) if entry_price0 else 0.0
-                buy_hedge_trades.append(
+                entry_signal = bool(entry_base.iloc[i])
+            if entry_signal:
+                entry_ready = True
+                trading_active = True
+        if entry_ready and reference_price is None:
+            reference_price = close_price
+            grid_index = 0
+
+        if entry_ready and not base_init_done and base_initial_shares > 0:
+            if limit_buy_price > 0 and close_price > limit_buy_price:
+                skipped_by_limit += 1
+                append_event(
                     {
-                        "trade_id": current_trade_id or trade_count + 1,
-                        "entry_date": str(entry_date),
-                        "exit_date": str(date),
-                        "entry_price": float(entry_price0),
-                        "exit_price": float(exit_price),
-                        "avg_cost": float(avg_cost),
-                        "total_shares": shares_to_hands(int(position)),
-                        "adds": int(add_count),
-                        "capital_used": float(position_cost),
-                        "pnl": float(pnl),
-                        "return_pct": float(pnl / position_cost) if position_cost else 0.0,
-                        "avg_cost_delta_pct": float(cost_reduction),
-                        "hedge_active": hedge_enabled,
-                        "hedge_mode": hedge_mode,
-                        "allow_repeat": allow_repeat,
+                        "date": date,
+                        "price": float(close_price),
+                        "shares": 0,
+                        "total_shares": int(position),
+                        "avg_cost": position_cost / position if position > 0 else None,
+                        "type": "skip",
+                        "layer": grid_index,
+                        "note": "超过限买价",
+                        "trigger_price": None,
                     }
                 )
-                max_layers = max(max_layers, add_count)
-                trade_add_records.append(add_count)
-                trade_count += 1
-                avg_cost_reduction_sum += float(cost_reduction)
-                position = 0
-                position_cost = 0.0
-                entry_idx = None
-                entry_price0 = 0.0
-                last_add_price = 0.0
-                add_count = 0
-                current_trade_id = 0
-                can_add_more = True
-                pending_exit = False
-                pending_exit_reason = ""
-                event_type = "exit"
-                exited_this_bar = True
-
-        if (not exited_this_bar) and position == 0 and buy.iloc[i] and start_position_shares > 0:
-            desired = start_position_shares
-            affordable = int(
-                cash / (price * (1 + fee_rate)) if fee_rate >= 0 else cash // price
-            )
-            affordable = lot_align(affordable)
-            shares = min(desired, affordable)
-            if shares > 0:
-                cost = shares * price
-                fee = cost * fee_rate
-                cash -= cost + fee
-                position = shares
-                position_cost = cost + fee
-                entry_idx = i
-                entry_price0 = price
-                last_add_price = price
-                add_count = 0
-                current_trade_id = trade_count + 1
-                can_add_more = True
-                avg_cost = position_cost / position
-                first_trigger_price = compute_trigger_price()
-                event_type = "entry"
-                event_shares = int(shares)
-                event_note = None
-                max_capital_used = max(max_capital_used, position_cost)
-                t1_guard.add(date, shares)
-                pending_exit = False
-                pending_exit_reason = ""
-
-        elif position > 0 and step_pct > 0 and not added_this_bar and can_add_more and not pending_exit and not exited_this_bar:
-            trigger_price = compute_trigger_price()
-            if trigger_price is not None and price <= trigger_price:
-                if max_adds > 0 and add_count >= max_adds:
-                    skipped_by_rule += 1
-                    can_add_more = False
-                    event_type = "skip"
-                    event_shares = 0
-                    event_note = "已达到最大加仓次数"
+            elif stop_adding_at_min and min_price > 0 and close_price <= min_price:
+                append_event(
+                    {
+                        "date": date,
+                        "price": float(close_price),
+                        "shares": 0,
+                        "total_shares": int(position),
+                        "avg_cost": position_cost / position if position > 0 else None,
+                        "type": "skip",
+                        "layer": grid_index,
+                        "note": "达到最低价",
+                        "trigger_price": None,
+                    }
+                )
+            else:
+                affordable = (
+                    int(cash / (close_price * (1 + fee_rate))) if fee_rate >= 0 else int(cash // close_price)
+                )
+                affordable = lot_align(affordable)
+                shares = min(base_initial_shares, affordable)
+                if shares > 0:
+                    cost = shares * close_price
+                    fee = cost * fee_rate
+                    cash -= cost + fee
+                    position += shares
+                    position_cost += cost + fee
+                    t1_guard.add(date, shares)
+                    if reference_mode == "last":
+                        reference_price = close_price
+                    current_trade_id = trade_count + 1
+                    cycle_entry_idx = i
+                    cycle_entry_price = close_price
+                    cycle_buy_shares = shares
+                    cycle_cost_total = cost + fee
+                    cycle_sell_total = 0.0
+                    cycle_add_count = 0
+                    cycle_buy_count = 1
+                    cycle_max_shares = max(cycle_max_shares, position)
+                    cycle_max_cost = max(cycle_max_cost, position_cost)
+                    max_capital_used = max(max_capital_used, position_cost)
+                    append_event(
+                        {
+                            "date": date,
+                            "price": float(close_price),
+                            "shares": int(shares),
+                            "total_shares": int(position),
+                            "avg_cost": float(position_cost / position),
+                            "type": "buy",
+                            "layer": grid_index,
+                            "note": "底仓",
+                            "trigger_price": None,
+                        }
+                    )
+                    last_buy_price = float(close_price)
                 else:
-                    desired = quantity_for_add(add_count)
-                    if desired <= 0:
-                        skipped_by_rule += 1
-                        can_add_more = False
-                        event_type = "skip"
-                        event_shares = 0
-                        event_note = "加仓数量为 0"
-                    else:
-                        affordable = int(cash / (price * (1 + fee_rate))) if fee_rate >= 0 else int(cash // price)
-                        affordable = lot_align(affordable)
-                        limit_shares = desired
-                        if max_capital_value > 0:
-                            remaining = max(0.0, max_capital_value - position_cost)
-                            limit_by_cap = (
-                                int(remaining / (price * (1 + fee_rate))) if fee_rate >= 0 else int(remaining // price)
-                            )
-                            limit_by_cap = max(0, limit_by_cap)
-                            limit_shares = min(limit_shares, limit_by_cap)
-                        limit_shares = lot_align(limit_shares)
-                        shares = min(desired, affordable, limit_shares)
-                        reason = None
-                        if shares <= 0:
-                            if affordable <= 0:
-                                skipped_by_cash += 1
-                                reason = "现金不足"
-                            else:
-                                skipped_by_limit += 1
-                                reason = "资金占用受限"
-                            can_add_more = False
-                            event_type = "skip"
-                            event_shares = 0
-                            event_note = reason
-                        else:
-                            cost = shares * price
-                            fee = cost * fee_rate
-                            cash -= cost + fee
-                            position += shares
-                            position_cost += cost + fee
-                            add_count += 1
-                            added_this_bar = True
-                            last_add_price = price
-                            avg_cost = position_cost / position if position > 0 else 0.0
-                            event_type = "add"
-                            event_shares = int(shares)
-                            event_note = None
-                            max_capital_used = max(max_capital_used, position_cost)
-                            t1_guard.add(date, shares)
-                            if max_adds > 0 and add_count >= max_adds:
-                                can_add_more = False
+                    skipped_by_cash += 1
+                    append_event(
+                        {
+                            "date": date,
+                            "price": float(close_price),
+                            "shares": 0,
+                            "total_shares": int(position),
+                            "avg_cost": position_cost / position if position > 0 else None,
+                            "type": "skip",
+                            "layer": grid_index,
+                            "note": "现金不足",
+                            "trigger_price": None,
+                        }
+                    )
+            base_init_done = True
 
-        equity.iloc[i] = cash + position * price
-
-        if position > 0 or event_type in {"exit", "entry", "add", "skip"}:
-            avg_cost_snapshot = float(position_cost / position) if position > 0 else None
-            trigger_snapshot = compute_trigger_price() if position > 0 else None
-            append_event(
-                {
-                    "date": date,
-                    "price": float(price),
-                    "shares": int(event_shares) if event_type in {"entry", "add"} else 0,
-                    "total_shares": int(position),
-                    "avg_cost": avg_cost_snapshot,
-                    "type": event_type or "record",
-                    "layer": int(add_count) if position > 0 else None,
-                    "note": event_note,
-                    "trigger_price": float(trigger_snapshot) if trigger_snapshot is not None else None,
-                }
+        step_type_value, step_pct_value, step_abs_value = resolve_step_values(i)
+        up_trigger = None
+        down_trigger = None
+        if reference_price is not None:
+            up_trigger, down_trigger = compute_triggers(
+                reference_price, grid_index, step_type_value, step_pct_value, step_abs_value
             )
 
-    if position > 0 and entry_idx is not None:
+        reverse_signal = False
+        if reverse_enabled:
+            base_signal = bool(reverse_base.iloc[i])
+            if reverse_filter_mode == "at_least":
+                reverse_window.append(base_signal)
+                if len(reverse_window) > reverse_filter_value:
+                    reverse_window.pop(0)
+                reverse_signal = sum(reverse_window) >= max(reverse_min_hits, 1)
+            else:
+                reverse_hits = reverse_hits + 1 if base_signal else 0
+                reverse_signal = reverse_hits >= reverse_filter_value
+            if reverse_signal and reverse_action == "adjust" and position > 0:
+                if reverse_profit_value > 0:
+                    value = reverse_profit_value
+                    if reverse_profit_type == "percent" and value > 1:
+                        value /= 100.0
+                    profit_override = (reverse_profit_type, value)
+                append_event(
+                    {
+                        "date": date,
+                        "price": float(close_price),
+                        "shares": 0,
+                        "total_shares": int(position),
+                        "avg_cost": position_cost / position if position > 0 else None,
+                        "type": "reverse",
+                        "layer": grid_index,
+                        "note": "反转信号触发止盈调整",
+                        "trigger_price": None,
+                    }
+                )
+
+        profit_trigger = None
+        profit_note = None
+        if position > 0:
+            base_price = 0.0
+            if profit_reference == "last" or profit_per_batch:
+                base_price = last_buy_price or (position_cost / position if position > 0 else 0.0)
+            else:
+                base_price = position_cost / position if position > 0 else 0.0
+            active_mode = profit_mode
+            active_value = profit_target_pct if profit_mode == "percent" else profit_target_abs
+            if profit_override:
+                active_mode, active_value = profit_override
+            if base_price > 0 and active_value > 0:
+                target = base_price * (1 + active_value) if active_mode == "percent" else base_price + active_value
+                if high_price >= target:
+                    profit_trigger = target
+                    profit_note = "止盈触发"
+
+        action = None
+        trigger_price = None
+        action_note = None
+        if reverse_signal and reverse_action == "exit" and position > 0:
+            action = "sell"
+            trigger_price = close_price
+            action_note = "反转信号"
+        elif profit_trigger is not None:
+            action = "sell"
+            trigger_price = profit_trigger
+            action_note = profit_note
+        elif up_trigger is not None and position > 0 and high_price >= up_trigger:
+            action = "sell"
+            trigger_price = up_trigger
+        elif down_trigger is not None and trading_active and low_price <= down_trigger:
+            action = "buy"
+            trigger_price = down_trigger
+
+        if action == "buy":
+            exec_price = float(trigger_price) if trigger_price is not None else close_price
+            if max_adds > 0 and cycle_add_count >= max_adds:
+                skipped_by_rule += 1
+                append_event(
+                    {
+                        "date": date,
+                        "price": float(exec_price),
+                        "shares": 0,
+                        "total_shares": int(position),
+                        "avg_cost": position_cost / position if position > 0 else None,
+                        "type": "skip",
+                        "layer": grid_index,
+                        "note": "已达到最大加仓次数",
+                        "trigger_price": float(trigger_price) if trigger_price is not None else None,
+                    }
+                )
+            elif limit_buy_price > 0 and exec_price > limit_buy_price:
+                skipped_by_limit += 1
+                append_event(
+                    {
+                        "date": date,
+                        "price": float(exec_price),
+                        "shares": 0,
+                        "total_shares": int(position),
+                        "avg_cost": position_cost / position if position > 0 else None,
+                        "type": "skip",
+                        "layer": grid_index,
+                        "note": "超过限买价",
+                        "trigger_price": float(trigger_price) if trigger_price is not None else None,
+                    }
+                )
+            elif stop_adding_at_min and min_price > 0 and low_price <= min_price:
+                skipped_by_rule += 1
+                append_event(
+                    {
+                        "date": date,
+                        "price": float(exec_price),
+                        "shares": 0,
+                        "total_shares": int(position),
+                        "avg_cost": position_cost / position if position > 0 else None,
+                        "type": "skip",
+                        "layer": grid_index,
+                        "note": "达到最低价",
+                        "trigger_price": float(trigger_price) if trigger_price is not None else None,
+                    }
+                )
+            else:
+                layer_index = cycle_buy_count
+                desired = desired_shares(layer_index, exec_price)
+                if desired <= 0:
+                    skipped_by_rule += 1
+                    append_event(
+                        {
+                            "date": date,
+                            "price": float(exec_price),
+                            "shares": 0,
+                            "total_shares": int(position),
+                            "avg_cost": position_cost / position if position > 0 else None,
+                            "type": "skip",
+                            "layer": grid_index,
+                            "note": "仓位不足（不足 1 手）",
+                            "trigger_price": float(trigger_price) if trigger_price is not None else None,
+                        }
+                    )
+                else:
+                    affordable = (
+                        int(cash / (exec_price * (1 + fee_rate))) if fee_rate >= 0 else int(cash // exec_price)
+                    )
+                    affordable = lot_align(affordable)
+                    shares = min(desired, affordable)
+                    if shares <= 0:
+                        skipped_by_cash += 1
+                        append_event(
+                            {
+                                "date": date,
+                                "price": float(exec_price),
+                                "shares": 0,
+                                "total_shares": int(position),
+                                "avg_cost": position_cost / position if position > 0 else None,
+                                "type": "skip",
+                                "layer": grid_index,
+                                "note": "现金不足",
+                                "trigger_price": float(trigger_price) if trigger_price is not None else None,
+                            }
+                        )
+                    else:
+                        cost = shares * exec_price
+                        fee = cost * fee_rate
+                        cash -= cost + fee
+                        position += shares
+                        position_cost += cost + fee
+                        t1_guard.add(date, shares)
+                        last_buy_price = float(exec_price)
+                        if cycle_buy_shares == 0:
+                            current_trade_id = trade_count + 1
+                            cycle_entry_idx = i
+                            cycle_entry_price = exec_price
+                            cycle_buy_shares = shares
+                            cycle_cost_total = cost + fee
+                            cycle_sell_total = 0.0
+                            cycle_add_count = 0
+                            cycle_buy_count = 1
+                        else:
+                            cycle_buy_shares += shares
+                            cycle_cost_total += cost + fee
+                            cycle_add_count += 1
+                            cycle_buy_count += 1
+                        cycle_max_shares = max(cycle_max_shares, position)
+                        cycle_max_cost = max(cycle_max_cost, position_cost)
+                        max_capital_used = max(max_capital_used, position_cost)
+                        append_event(
+                            {
+                                "date": date,
+                                "price": float(exec_price),
+                                "shares": int(shares),
+                                "total_shares": int(position),
+                                "avg_cost": float(position_cost / position),
+                                "type": "buy",
+                                "layer": grid_index - 1 if reference_mode != "last" else grid_index,
+                                "note": None,
+                                "trigger_price": float(trigger_price) if trigger_price is not None else None,
+                            }
+                        )
+                        if reference_mode == "last":
+                            reference_price = exec_price
+                        else:
+                            grid_index -= 1
+
+        elif action == "sell":
+            exec_price = float(trigger_price) if trigger_price is not None else close_price
+            if limit_sell_price > 0 and exec_price < limit_sell_price:
+                skipped_by_limit += 1
+                append_event(
+                    {
+                        "date": date,
+                        "price": float(exec_price),
+                        "shares": 0,
+                        "total_shares": int(position),
+                        "avg_cost": position_cost / position if position > 0 else None,
+                        "type": "skip",
+                        "layer": grid_index,
+                        "note": "低于限平价",
+                        "trigger_price": float(trigger_price) if trigger_price is not None else None,
+                    }
+                )
+            else:
+                desired = exit_shares_for_sell(exec_price)
+                if desired <= 0:
+                    skipped_by_rule += 1
+                    append_event(
+                        {
+                            "date": date,
+                            "price": float(exec_price),
+                            "shares": 0,
+                            "total_shares": int(position),
+                            "avg_cost": position_cost / position if position > 0 else None,
+                            "type": "skip",
+                            "layer": grid_index,
+                            "note": "卖出比例不足（不足 1 手）",
+                            "trigger_price": float(trigger_price) if trigger_price is not None else None,
+                        }
+                    )
+                else:
+                    sellable = min(position, desired)
+                    if exit_mode == "single":
+                        if not t1_guard.can_sell(date, position):
+                            skipped_by_rule += 1
+                            append_event(
+                                {
+                                    "date": date,
+                                    "price": float(exec_price),
+                                    "shares": 0,
+                                    "total_shares": int(position),
+                                    "avg_cost": position_cost / position if position > 0 else None,
+                                    "type": "skip",
+                                    "layer": grid_index,
+                                    "note": "T+1限制",
+                                    "trigger_price": float(trigger_price) if trigger_price is not None else None,
+                                }
+                            )
+                            sellable = 0
+                    if sellable <= 0 or t1_guard.available(date) < sellable:
+                        if sellable > 0:
+                            sellable = min(sellable, t1_guard.available(date))
+                        if sellable <= 0:
+                            skipped_by_rule += 1
+                            append_event(
+                                {
+                                    "date": date,
+                                    "price": float(exec_price),
+                                    "shares": 0,
+                                    "total_shares": int(position),
+                                    "avg_cost": position_cost / position if position > 0 else None,
+                                    "type": "skip",
+                                    "layer": grid_index,
+                                    "note": "T+1限制",
+                                    "trigger_price": float(trigger_price) if trigger_price is not None else None,
+                                }
+                            )
+                    if sellable > 0:
+                        avg_cost = position_cost / position if position > 0 else 0.0
+                        value = sellable * exec_price
+                        fee = value * fee_rate
+                        cash += value - fee
+                        position -= sellable
+                        position_cost = max(0.0, position_cost - avg_cost * sellable)
+                        cycle_sell_total += value - fee
+                        t1_guard.consume(date, sellable)
+                        append_event(
+                            {
+                                "date": date,
+                                "price": float(exec_price),
+                                "shares": int(sellable),
+                                "total_shares": int(position),
+                                "avg_cost": float(position_cost / position) if position > 0 else None,
+                                "type": "sell",
+                                "layer": grid_index + 1 if reference_mode != "last" else grid_index,
+                                "note": action_note,
+                                "trigger_price": float(trigger_price) if trigger_price is not None else None,
+                            }
+                        )
+                        if reference_mode == "last":
+                            reference_price = exec_price
+                        else:
+                            grid_index += 1
+                        if position == 0 and cycle_buy_shares > 0 and cycle_entry_idx is not None:
+                            main_exit = True
+                            main_exit_price = exec_price
+                            main_exit_reason = action_note or "主仓清仓"
+                            entry_date = idx[cycle_entry_idx]
+                            pnl = cycle_sell_total - cycle_cost_total
+                            avg_cost_cycle = cycle_cost_total / cycle_buy_shares if cycle_buy_shares > 0 else 0.0
+                            cost_reduction = (
+                                (cycle_entry_price - avg_cost_cycle) / cycle_entry_price if cycle_entry_price else 0.0
+                            )
+                            days_hold = (date - entry_date).days
+                            trades.append(
+                                Trade(
+                                    entry_date=entry_date,
+                                    exit_date=date,
+                                    entry_price=float(cycle_entry_price),
+                                    exit_price=float(exec_price),
+                                    return_pct=float(pnl / cycle_cost_total) if cycle_cost_total else 0.0,
+                                    holding_days=int(days_hold),
+                                    note="买入对冲-区间离场",
+                                    investment_amount=float(cycle_max_cost) if cycle_max_cost else None,
+                                )
+                            )
+                            buy_hedge_trades.append(
+                                {
+                                    "trade_id": current_trade_id or trade_count + 1,
+                                    "entry_date": str(entry_date),
+                                    "exit_date": str(date),
+                                    "entry_price": float(cycle_entry_price),
+                                    "exit_price": float(exec_price),
+                                    "avg_cost": float(avg_cost_cycle),
+                                    "total_shares": shares_to_hands(int(cycle_max_shares)),
+                                    "adds": int(cycle_add_count),
+                                    "capital_used": float(cycle_max_cost),
+                                    "pnl": float(pnl),
+                                    "return_pct": float(pnl / cycle_cost_total) if cycle_cost_total else 0.0,
+                                    "avg_cost_delta_pct": float(cost_reduction),
+                                    "hedge_active": hedge_enabled,
+                                    "hedge_mode": hedge_mode,
+                                    "allow_repeat": allow_repeat,
+                                }
+                            )
+                            trade_count += 1
+                            total_adds += cycle_add_count
+                            max_layers = max(max_layers, cycle_add_count)
+                            avg_cost_reduction_sum += float(cost_reduction)
+                            current_trade_id = 0
+                            cycle_entry_idx = None
+                            cycle_entry_price = 0.0
+                            cycle_buy_shares = 0
+                            cycle_cost_total = 0.0
+                            cycle_sell_total = 0.0
+                            cycle_add_count = 0
+                            cycle_buy_count = 0
+                            cycle_max_shares = 0
+                            cycle_max_cost = 0.0
+                            last_buy_price = 0.0
+                            profit_override = None
+                            reverse_hits = 0
+                            reverse_window = []
+                            if allow_repeat:
+                                entry_ready = entry_mode == "none"
+                                trading_active = entry_ready
+                                entry_hits = 0
+                                base_init_done = base_initial_shares <= 0
+                                if base_reference_source == "custom" and base_reference_price > 0:
+                                    reference_price = float(base_reference_price)
+                                else:
+                                    reference_price = None
+                                grid_index = 0
+                                hedge_paused = False
+                            else:
+                                trading_active = False
+
+        if hedge_enabled:
+            hedge_exit_price = None
+            hedge_exit_note = None
+            if hedge_position > 0:
+                if hedge_exit_on_main and main_exit:
+                    hedge_exit_price = main_exit_price or close_price
+                    hedge_exit_note = main_exit_reason or "主仓平仓"
+                else:
+                    loss_target = hedge_loss_trigger()
+                    if hedge_exit_on_loss and loss_target is not None and high_price >= loss_target:
+                        hedge_exit_price = loss_target
+                        hedge_exit_note = "对冲止损"
+                    profit_target = hedge_profit_trigger()
+                    if hedge_exit_price is None and hedge_exit_on_profit and profit_target is not None and low_price <= profit_target:
+                        hedge_exit_price = profit_target
+                        hedge_exit_note = "对冲止盈"
+                    if hedge_exit_price is None and hedge_exit_on_reverse and reverse_signal:
+                        hedge_exit_price = close_price
+                        hedge_exit_note = "反转信号"
+            if hedge_exit_price is not None and hedge_position > 0:
+                hedge_cover(date, float(hedge_exit_price), hedge_position, hedge_exit_note or "对冲结束", hedge_exit_price)
+                hedge_paused = True
+            if not hedge_paused and position > 0:
+                target_hedge = resolve_hedge_target(close_price)
+                if hedge_mode == "weak":
+                    if hedge_position == 0 and target_hedge > 0:
+                        hedge_open(date, close_price, target_hedge, "固定对冲", None)
+                else:
+                    if target_hedge > hedge_position:
+                        hedge_open(date, close_price, target_hedge - hedge_position, "跟随对冲", None)
+                    elif target_hedge < hedge_position:
+                        hedge_cover(date, close_price, hedge_position - target_hedge, "对冲回补", None)
+
+        equity.iloc[i] = cash + position * close_price + hedge_cash - hedge_position * close_price
+
+    if position > 0 and cycle_entry_idx is not None:
         date = idx[-1]
         price = float(close.iloc[-1])
         if t1_guard.can_sell(date, position):
-            t1_guard.consume(date, position)
-            value = position * price
-            exit_fee = value * fee_rate
-            cash += value - exit_fee
+            sell_shares = position
             avg_cost = position_cost / position if position > 0 else 0.0
-            entry_date = idx[entry_idx]
+            value = sell_shares * price
+            fee = value * fee_rate
+            cash += value - fee
+            cycle_sell_total += value - fee
+            t1_guard.consume(date, sell_shares)
+            position = 0
+            position_cost = 0.0
+            entry_date = idx[cycle_entry_idx]
+            pnl = cycle_sell_total - cycle_cost_total
+            avg_cost_cycle = cycle_cost_total / cycle_buy_shares if cycle_buy_shares > 0 else 0.0
+            cost_reduction = (
+                (cycle_entry_price - avg_cost_cycle) / cycle_entry_price if cycle_entry_price else 0.0
+            )
             days_hold = (date - entry_date).days
             trades.append(
                 Trade(
                     entry_date=entry_date,
                     exit_date=date,
-                    entry_price=float(entry_price0),
+                    entry_price=float(cycle_entry_price),
                     exit_price=float(price),
-                    return_pct=float((price - entry_price0) / entry_price0) if entry_price0 else 0.0,
+                    return_pct=float(pnl / cycle_cost_total) if cycle_cost_total else 0.0,
                     holding_days=int(days_hold),
                     note="买入对冲-样本结束强平",
-                    investment_amount=float(position_cost) if position_cost else None,
+                    investment_amount=float(cycle_max_cost) if cycle_max_cost else None,
                 )
             )
-            pnl = value - exit_fee - position_cost
-            cost_reduction = ((entry_price0 - avg_cost) / entry_price0) if entry_price0 else 0.0
             buy_hedge_trades.append(
                 {
                     "trade_id": current_trade_id or trade_count + 1,
                     "entry_date": str(entry_date),
                     "exit_date": str(date),
-                    "entry_price": float(entry_price0),
+                    "entry_price": float(cycle_entry_price),
                     "exit_price": float(price),
-                    "avg_cost": float(avg_cost),
-                    "total_shares": shares_to_hands(int(position)),
-                    "adds": int(add_count),
-                    "capital_used": float(position_cost),
+                    "avg_cost": float(avg_cost_cycle),
+                    "total_shares": shares_to_hands(int(cycle_max_shares)),
+                    "adds": int(cycle_add_count),
+                    "capital_used": float(cycle_max_cost),
                     "pnl": float(pnl),
-                    "return_pct": float(pnl / position_cost) if position_cost else 0.0,
+                    "return_pct": float(pnl / cycle_cost_total) if cycle_cost_total else 0.0,
                     "avg_cost_delta_pct": float(cost_reduction),
                     "hedge_active": hedge_enabled,
                     "hedge_mode": hedge_mode,
                     "allow_repeat": allow_repeat,
                 }
             )
-            max_layers = max(max_layers, add_count)
-            trade_add_records.append(add_count)
             trade_count += 1
+            total_adds += cycle_add_count
+            max_layers = max(max_layers, cycle_add_count)
             avg_cost_reduction_sum += float(cost_reduction)
-            pending_exit = False
-            pending_exit_reason = ""
         else:
-            pending_exit = True
-            pending_exit_reason = "样本结束未满足T+1"
+            append_event(
+                {
+                    "date": date,
+                    "price": float(price),
+                    "shares": 0,
+                    "total_shares": int(position),
+                    "avg_cost": position_cost / position if position > 0 else None,
+                    "type": "skip",
+                    "layer": grid_index,
+                    "note": "样本结束未满足T+1",
+                    "trigger_price": None,
+                }
+            )
+
+    if hedge_position > 0 and len(idx):
+        date = idx[-1]
+        price = float(close.iloc[-1])
+        hedge_cover(date, price, hedge_position, "样本结束对冲平仓", price)
 
     final_price = float(close.iloc[-1]) if len(close) else 0.0
-    equity.iloc[-1] = cash + position * final_price
+    equity.iloc[-1] = cash + position * final_price + hedge_cash - hedge_position * final_price
     result = _calc_stats(equity, trades)
 
-    total_adds = sum(trade_add_records)
     avg_adds_per_trade = float(total_adds / trade_count) if trade_count else 0.0
     avg_cost_reduction = float(avg_cost_reduction_sum / trade_count) if trade_count else 0.0
     summary = {
@@ -1273,20 +2101,38 @@ def backtest_buy_hedge(
         "avg_cost_reduction_pct": avg_cost_reduction,
         "step_type": step_type,
         "step_pct": float(step_pct),
-        "mode": mode,
+        "mode": growth_mode,
         "start_position": int(start_position_hands),
         "increment_unit": int(increment_unit_hands),
-        "max_adds": int(max_adds),
-        "reference": reference,
-        "max_capital_value": float(max_capital_value) if max_capital_value > 0 else None,
-        "max_capital_ratio": float(max_capital_ratio) if max_capital_ratio > 0 else None,
-        "max_capital_input": max_capital_input,
+        "max_adds": int(config.get("max_adds") or 0),
+        "reference": reference_mode,
+        "max_capital_value": None,
+        "max_capital_ratio": None,
+        "max_capital_input": None,
         "skipped_by_cash": int(skipped_by_cash),
         "skipped_by_limit": int(skipped_by_limit),
         "skipped_by_rule": int(skipped_by_rule),
-        "hedge": {"enabled": hedge_enabled, "mode": hedge_mode},
+        "hedge_trade_count": int(hedge_trade_count),
+        "hedge": {
+            "enabled": hedge_enabled,
+            "mode": hedge_mode,
+            "size_mode": hedge_size_mode,
+            "size_ratio": float(hedge_size_ratio),
+            "size_hands": int(hedge_size_hands),
+            "size_amount": float(hedge_size_amount),
+            "exit": {
+                "on_main_exit": bool(hedge_exit_on_main),
+                "on_profit": bool(hedge_exit_on_profit),
+                "profit_mode": hedge_exit_profit_mode,
+                "profit_value": float(hedge_exit_profit_value),
+                "on_loss": bool(hedge_exit_on_loss),
+                "loss_mode": hedge_exit_loss_mode,
+                "loss_value": float(hedge_exit_loss_value),
+                "on_reverse": bool(hedge_exit_on_reverse),
+            },
+        },
         "allow_repeat": allow_repeat,
-        "step_mode": config.get("step_mode"),
+        "step_mode": step_mode,
         "step_abs": config.get("step_abs"),
         "step_rounding": config.get("step_rounding"),
         "step_auto": config.get("step_auto"),
@@ -1304,6 +2150,8 @@ def backtest_buy_hedge(
     result.buy_hedge_summary = summary
     result.buy_hedge_trades = buy_hedge_trades or []
     result.buy_hedge_events = events or []
+    result.buy_hedge_hedge_trades = hedge_trades or []
+    result.buy_hedge_hedge_events = hedge_events or []
     return result
 
 
