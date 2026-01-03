@@ -282,6 +282,8 @@ def backtest_take_profit_stop_loss(
         df.set_index("date", inplace=True)
 
     close = df["close"]
+    high = df["high"] if "high" in df.columns else close
+    low = df["low"] if "low" in df.columns else close
     idx = df.index
     cash = initial_capital
     position = 0
@@ -399,6 +401,8 @@ def backtest_dynamic_capital(
         df.set_index("date", inplace=True)
 
     close = df["close"]
+    high = df["high"] if "high" in df.columns else close
+    low = df["low"] if "low" in df.columns else close
     idx = df.index
     equity = pd.Series(index=idx, dtype=float)
     baseline_equity = pd.Series(index=idx, dtype=float)
@@ -904,6 +908,8 @@ def backtest_buy_hedge(
         df.set_index("date", inplace=True)
 
     close = df["close"]
+    high = df["high"] if "high" in df.columns else close
+    low = df["low"] if "low" in df.columns else close
     idx = df.index
     equity = pd.Series(index=idx, dtype=float)
 
@@ -1044,6 +1050,7 @@ def backtest_buy_hedge(
     entry_ma_slow = max(0, to_int(entry_cfg.get("ma_slow"), 0))
     entry_ma_period = max(0, to_int(entry_cfg.get("ma_period"), 0))
     entry_progressive_count = max(1, to_int(entry_cfg.get("progressive_count"), 1))
+    force_first_buy = bool(config.get("force_first_buy"))
 
     profit_cfg = config.get("profit", {}) or {}
     profit_mode = str(profit_cfg.get("mode") or "percent").lower()
@@ -1108,6 +1115,20 @@ def backtest_buy_hedge(
             k_vals.append(k_prev)
             d_vals.append(d_prev)
         return pd.Series(k_vals, index=close_s.index), pd.Series(d_vals, index=close_s.index)
+
+    def profit_target_price(
+        base_price: float, value: float, mode: str, base_includes_fee: bool
+    ) -> Optional[float]:
+        if base_price <= 0 or value <= 0:
+            return None
+        base_cost = base_price if base_includes_fee else base_price * (1 + fee_rate)
+        if mode == "percent":
+            target_cost = base_cost * (1 + value)
+        else:
+            target_cost = base_cost + value
+        if fee_rate >= 1:
+            return None
+        return target_cost / (1 - fee_rate)
 
     entry_fast_ma = close_series.rolling(entry_ma_fast).mean() if entry_ma_fast > 0 else None
     entry_slow_ma = close_series.rolling(entry_ma_slow).mean() if entry_ma_slow > 0 else None
@@ -1513,6 +1534,117 @@ def backtest_buy_hedge(
             reference_price = close_price
             grid_index = 0
 
+        if (
+            entry_ready
+            and trading_active
+            and force_first_buy
+            and position == 0
+            and cycle_buy_shares == 0
+            and base_initial_shares <= 0
+        ):
+            if limit_buy_price > 0 and close_price > limit_buy_price:
+                skipped_by_limit += 1
+                append_event(
+                    {
+                        "date": date,
+                        "price": float(close_price),
+                        "shares": 0,
+                        "total_shares": int(position),
+                        "avg_cost": None,
+                        "type": "skip",
+                        "layer": grid_index,
+                        "note": "超过限买价",
+                        "trigger_price": None,
+                    }
+                )
+            elif stop_adding_at_min and min_price > 0 and close_price <= min_price:
+                skipped_by_rule += 1
+                append_event(
+                    {
+                        "date": date,
+                        "price": float(close_price),
+                        "shares": 0,
+                        "total_shares": int(position),
+                        "avg_cost": None,
+                        "type": "skip",
+                        "layer": grid_index,
+                        "note": "达到最低价",
+                        "trigger_price": None,
+                    }
+                )
+            else:
+                desired = desired_shares(0, close_price)
+                if desired <= 0:
+                    skipped_by_rule += 1
+                    append_event(
+                        {
+                            "date": date,
+                            "price": float(close_price),
+                            "shares": 0,
+                            "total_shares": int(position),
+                            "avg_cost": None,
+                            "type": "skip",
+                            "layer": grid_index,
+                            "note": "仓位不足（不足 1 手）",
+                            "trigger_price": None,
+                        }
+                    )
+                else:
+                    affordable = (
+                        int(cash / (close_price * (1 + fee_rate))) if fee_rate >= 0 else int(cash // close_price)
+                    )
+                    affordable = lot_align(affordable)
+                    shares = min(desired, affordable)
+                    if shares > 0:
+                        cost = shares * close_price
+                        fee = cost * fee_rate
+                        cash -= cost + fee
+                        position += shares
+                        position_cost += cost + fee
+                        t1_guard.add(date, shares)
+                        if reference_mode == "last":
+                            reference_price = close_price
+                        current_trade_id = trade_count + 1
+                        cycle_entry_idx = i
+                        cycle_entry_price = close_price
+                        cycle_buy_shares = shares
+                        cycle_cost_total = cost + fee
+                        cycle_sell_total = 0.0
+                        cycle_add_count = 0
+                        cycle_buy_count = 1
+                        cycle_max_shares = max(cycle_max_shares, position)
+                        cycle_max_cost = max(cycle_max_cost, position_cost)
+                        max_capital_used = max(max_capital_used, position_cost)
+                        append_event(
+                            {
+                                "date": date,
+                                "price": float(close_price),
+                                "shares": int(shares),
+                                "total_shares": int(position),
+                                "avg_cost": float(position_cost / position),
+                                "type": "buy",
+                                "layer": grid_index,
+                                "note": "首单",
+                                "trigger_price": None,
+                            }
+                        )
+                        last_buy_price = float(close_price)
+                    else:
+                        skipped_by_cash += 1
+                        append_event(
+                            {
+                                "date": date,
+                                "price": float(close_price),
+                                "shares": 0,
+                                "total_shares": int(position),
+                                "avg_cost": None,
+                                "type": "skip",
+                                "layer": grid_index,
+                                "note": "现金不足",
+                                "trigger_price": None,
+                            }
+                        )
+
         if entry_ready and not base_init_done and base_initial_shares > 0:
             if limit_buy_price > 0 and close_price > limit_buy_price:
                 skipped_by_limit += 1
@@ -1641,10 +1773,14 @@ def backtest_buy_hedge(
 
         profit_trigger = None
         profit_note = None
+        profit_active = False
         if position > 0:
             base_price = 0.0
+            base_includes_fee = True
             if profit_reference == "last" or profit_per_batch:
                 base_price = last_buy_price or (position_cost / position if position > 0 else 0.0)
+                if last_buy_price > 0:
+                    base_includes_fee = False
             else:
                 base_price = position_cost / position if position > 0 else 0.0
             active_mode = profit_mode
@@ -1652,8 +1788,9 @@ def backtest_buy_hedge(
             if profit_override:
                 active_mode, active_value = profit_override
             if base_price > 0 and active_value > 0:
-                target = base_price * (1 + active_value) if active_mode == "percent" else base_price + active_value
-                if high_price >= target:
+                profit_active = True
+                target = profit_target_price(base_price, active_value, active_mode, base_includes_fee)
+                if target is not None and high_price >= target:
                     profit_trigger = target
                     profit_note = "止盈触发"
 
@@ -1668,7 +1805,7 @@ def backtest_buy_hedge(
             action = "sell"
             trigger_price = profit_trigger
             action_note = profit_note
-        elif up_trigger is not None and position > 0 and high_price >= up_trigger:
+        elif up_trigger is not None and position > 0 and high_price >= up_trigger and not (profit_active and profit_trigger is None):
             action = "sell"
             trigger_price = up_trigger
         elif down_trigger is not None and trading_active and low_price <= down_trigger:
@@ -1822,7 +1959,8 @@ def backtest_buy_hedge(
                     }
                 )
             else:
-                desired = exit_shares_for_sell(exec_price)
+                force_full_exit = action_note == "止盈触发" and not profit_per_batch
+                desired = position if force_full_exit else exit_shares_for_sell(exec_price)
                 if desired <= 0:
                     skipped_by_rule += 1
                     append_event(
@@ -2139,6 +2277,7 @@ def backtest_buy_hedge(
         "growth": config.get("growth"),
         "position": config.get("position"),
         "entry": config.get("entry"),
+        "force_first_buy": force_first_buy,
         "profit": config.get("profit"),
         "reverse": config.get("reverse"),
         "capital": config.get("capital"),

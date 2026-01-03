@@ -2486,6 +2486,23 @@ label {
   line-height: 1;
 }
 
+.checkbox-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.checkbox-field__control {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  margin-top: -4px;
+}
+
+.checkbox-field input[type='checkbox'] {
+  margin: 0;
+}
+
 .sub-grid {
   margin-top: 10px;
   display: grid;

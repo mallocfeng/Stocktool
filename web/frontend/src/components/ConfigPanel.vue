@@ -116,6 +116,7 @@ const config = reactive({
       entryMaSlow: 10,
       entryMaPeriod: 20,
       entryProgressiveCount: 3,
+      forceFirstBuy: false,
       profitMode: 'percent',
       profitTargetPercent: 5,
       profitTargetAbsolute: 0,
@@ -681,6 +682,7 @@ const buildStrategiesPayload = () => {
           ma_slow: toNumber(bh.entryMaSlow),
           progressive_count: parseInt(bh.entryProgressiveCount, 10) || 0,
         },
+        force_first_buy: Boolean(bh.forceFirstBuy),
         profit: {
           mode: bh.profitMode || 'percent',
           target_pct: toRatio(bh.profitTargetPercent),
@@ -1353,7 +1355,7 @@ const runBacktest = () => {
                       <label class="field">
                         <span>开仓方式</span>
                         <select v-model="config.strategies.buyHedge.entryMode">
-                          <option value="none">无 MA，任意满足策略即可首单</option>
+                          <option value="none">无 MA（仅步长/首单规则触发）</option>
                           <option value="ma">MA 指标金叉 / 上穿</option>
                           <option value="ma_progressive">MA 指标累进满足</option>
                         </select>
@@ -1382,6 +1384,12 @@ const runBacktest = () => {
                           min="1"
                           v-model="config.strategies.buyHedge.entryProgressiveCount"
                         />
+                      </label>
+                      <label class="field checkbox-field">
+                        <span>首单直接买入</span>
+                        <div class="checkbox-field__control">
+                          <input type="checkbox" v-model="config.strategies.buyHedge.forceFirstBuy" />
+                        </div>
                       </label>
                     </div>
                   </div>
