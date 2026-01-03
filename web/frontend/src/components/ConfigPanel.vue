@@ -116,7 +116,7 @@ const config = reactive({
       entryMaSlow: 10,
       entryMaPeriod: 20,
       entryProgressiveCount: 3,
-      forceFirstBuy: false,
+      forceFirstBuy: true,
       profitMode: 'percent',
       profitTargetPercent: 5,
       profitTargetAbsolute: 0,
